@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="test/vendor/jquery.js"></script>
+    <script src="test/vendor/underscore.js"></script>
+    <script src="test/vendor/backbone.js"></script>
+    <script>
+      Backbone.extensions = { view: {} };
+    </script>
+    <script src="backbone.extended.live-templates.js"></script>
+    <script>
+      var view = new Backbone.View();
+      view.template = '<div>HI!</div>';
+      Backbone.extensions.view.liveTemplates.call(view);
+    </script>
+  </head>
+  </body>
+  </body>
+</html>
