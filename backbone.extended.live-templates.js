@@ -1,20 +1,19 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getProperty, ifUnlessHelper, isExpression, liveTemplates, operators, parseExpression, replaceTemplateBlocks, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes,
+  var Backbone, bindExpression, config, decodeAttribute, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes,
     __slice = [].slice;
 
   Backbone = this.Backbone || typeof require === 'function' && require('backbone');
 
   config = {
     dontRemoveAttributes: true,
-    dontStripElements: true
+    dontStripElements: true,
+    logExpressionErrors: true
   };
 
   expressionFunctions = {};
 
-  operators = '* / % + - << >> >>> < <= > >= == != === !== & ^ ! | && ||'.split(' ').concat(' in  ', ' instanceof ');
-
   isExpression = function(string) {
-    return /^[a-z_\.]+$/.test(string.trim());
+    return !/^[$a-z_\.]+$/.test(string.trim());
   };
 
   escapeForRegex = function(str) {
@@ -38,19 +37,30 @@
   };
 
   liveTemplates = function(context, config, options) {
-    var $template, template;
+    var $template, template, _base;
+    if (config == null) {
+      config = {};
+    }
     template = this.template || config.template;
+    this.liveTemplate = {
+      hiddenDOM: [],
+      singletons: config.singletons || {}
+    };
+    if ((_base = this.liveTemplate.singletons).view == null) {
+      _base.view = this;
+    }
     $template = liveTemplates.init(template, this);
+    this.liveTemplate.$template = $template;
     return this.$el.empty().append($template);
   };
 
   parseExpression = function(context, expression) {
     var dependencies, expressionIsExpression, fn, newExpressionString, regex,
       _this = this;
-    regex = /[a-z\.]+/gi;
+    regex = /[$a-z\.]+/gi;
     dependencies = [];
     newExpressionString = expression.replace(regex, function(keypath) {
-      if (keypath.indexOf('$window.' !== 0)) {
+      if (keypath.indexOf('$window.') !== 0 && keypath.indexOf('$view.') !== 0) {
         dependencies.push(keypath);
       }
       return "getProperty( context, '" + keypath + "' )";
@@ -62,7 +72,7 @@
       if (expressionFunctions[newExpressionString]) {
         fn = expressionFunctions[newExpressionString];
       } else {
-        fn = new Function('context', 'getProperty', "return " + newExpressionString);
+        fn = new Function('context', 'getProperty', 'expression', 'config', "try {          return " + newExpressionString + "        } catch (error) {          if (config.logExpressionErrors)            console.info('[INFO] Template error caught: \\n' +              '       Expression:' + expression + '\\n' +              '       Message:' + error.message)        }");
         expressionFunctions[newExpressionString] = fn;
       }
     }
@@ -75,17 +85,29 @@
   };
 
   bindExpression = function(context, binding, callback) {
-    var changeCallback, parsed;
+    var changeCallback, dep, parsed, propertyName, singleton, singletonName, split, _i, _len, _ref;
     parsed = parseExpression(context, binding.expression);
     changeCallback = function() {
-      if (binding.isExpression) {
-        return callback(parsed.fn(context, getProperty));
+      if (parsed.isExpression) {
+        return callback(parsed.fn(context, getProperty, binding.expression, config));
       } else {
-        return context.get(parsed.expression);
+        return context.get(binding.expression.trim());
       }
     };
     if (parsed.dependencies) {
-      context.on('change:' + parsed.dependencies.join(' change:'), changeCallback);
+      _ref = parsed.dependencies;
+      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
+        dep = _ref[_i];
+        if (dep[0] === '$') {
+          split = dep.split('.');
+          singletonName = split.substring(1);
+          singleton = context.liveTemplate.singletons[singletonName];
+          propertyName = split.slice(1).join('.');
+          context.listenTo(singleton, "change:" + propertyName);
+        } else if (dep.indexOf('$window.') !== 0 && dep.indexOf('$view.') !== 0) {
+          context.on("change:" + dep, changeCallback);
+        }
+      }
     }
     return changeCallback();
   };
@@ -105,9 +127,10 @@
   };
 
   getProperty = function(context, keypath) {
-    var res, value, _i, _len, _ref;
+    var res, singleton, split, value, _i, _j, _len, _len1, _ref, _ref1;
     if (keypath.indexOf('$window.') === 0) {
-      _ref = keyPath.split;
+      res = window;
+      _ref = keypath.split('.').slice(1);
       for (_i = 0, _len = _ref.length; _i < _len; _i++) {
         value = _ref[_i];
         if (res) {
@@ -115,6 +138,22 @@
         }
       }
       return res;
+    } else if (keypath.indexOf('$view.') === 0) {
+      res = this;
+      _ref1 = keypath.split('.').slice(1);
+      for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
+        value = _ref1[_j];
+        if (res) {
+          res = res[value];
+        }
+      }
+      return res;
+    } else if (keypath[0] === '$') {
+      split = keypath.split('.');
+      singleton = keypath[0];
+      try {
+        return context.liveTemplate.singletons[singleton].get(split.slice(1).join('.'));
+      } catch (_error) {}
     } else {
       try {
         return context.get(keypath);
@@ -204,15 +243,19 @@
     stripped = stripBoundTag($el);
     $contents = stripped.$contents;
     $placeholder = stripped.$placeholder;
-    isInserted = false;
+    isInserted = true;
     return bindExpression(context, binding, function(result) {
+      var hiddenDOM;
       if (inverse) {
         result = !result;
       }
       if (result && !isInserted) {
         $contents.insertAfter($placeholder);
+        hiddenDOM = context.liveTemplate.hiddenDOM;
+        hiddenDOM.splice(hiddenDOM.indexOf($contents), 1);
         return isInserted = true;
       } else if (!result && isInserted) {
+        context.liveTemplate.hiddenDOM.push($contents);
         $contents.remove();
         return isInserted = false;
       }
@@ -299,6 +342,8 @@
   });
 
   liveTemplates.helpers = templateHelpers;
+
+  liveTemplates.config = config;
 
   Backbone.extensions.view.liveTemplates = liveTemplates;
 

@@ -3,15 +3,11 @@ Backbone = @Backbone or typeof require is 'function' and require 'backbone'
 config =
   dontRemoveAttributes: true
   dontStripElements: true
+  logExpressionErrors: true
 
 expressionFunctions = {}
 
-operators =
-  '* / % + - << >> >>> < <= > >= == != === !== & ^ ! | && ||'
-    .split(' ')
-    .concat ' in  ', ' instanceof '
-
-isExpression = (string) -> /^[a-z_\.]+$/.test string.trim()
+isExpression = (string) -> not /^[$a-z_\.]+$/.test string.trim()
 
 
 # Utils - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -24,9 +20,12 @@ unescapeQuotes  = (string) -> string.replace /\\'/g, "'"
 encodeAttribute = (object) -> escapeQuotes JSON.stringify object
 decodeAttribute = (string) -> JSON.parse unescapeQuotes string or ''
 
-liveTemplates = (context, config, options) ->
+liveTemplates = (context, config = {}, options) ->
   template = @template or config.template
+  @liveTemplate = hiddenDOM: [], singletons: config.singletons or {}
+  @liveTemplate.singletons.view ?= @
   $template = liveTemplates.init template, @
+  @liveTemplate.$template = $template
   @$el.empty().append $template
 
 
@@ -35,11 +34,12 @@ liveTemplates = (context, config, options) ->
 parseExpression = (context, expression) ->
   # FIXME: this breaks if string contains ' in ' or ' instanceof '
   #   e.g. {{#if foo === 'hello in vegas' }}
-  regex = /[a-z\.]+/gi
+  regex = /[$a-z\.]+/gi
   dependencies = []
 
   newExpressionString = expression.replace regex, (keypath) =>
-    dependencies.push keypath if keypath.indexOf '$window.' isnt 0
+    if keypath.indexOf('$window.') isnt 0 and keypath.indexOf('$view.') isnt 0
+      dependencies.push keypath
     "getProperty( context, '#{ keypath }' )"
 
   if isExpression expression
@@ -49,8 +49,15 @@ parseExpression = (context, expression) ->
     if expressionFunctions[newExpressionString]
       fn = expressionFunctions[newExpressionString]
     else
-      fn = new Function 'context', 'getProperty',
-        "return #{newExpressionString}"
+      fn = new Function 'context', 'getProperty', 'expression', 'config',
+        "try {
+          return #{ newExpressionString }
+        } catch (error) {
+          if (config.logExpressionErrors)
+            console.info('[INFO] Template error caught: \\n' +
+              '       Expression:' + expression + '\\n' +
+              '       Message:' + error.message)
+        }"
       expressionFunctions[newExpressionString] = fn
 
   string: expression
@@ -62,13 +69,21 @@ bindExpression = (context, binding, callback) ->
   parsed = parseExpression context, binding.expression
 
   changeCallback = ->
-    if binding.isExpression
-      callback parsed.fn context, getProperty
+    if parsed.isExpression
+      callback parsed.fn context, getProperty, binding.expression, config
     else
-      context.get parsed.expression
+      context.get binding.expression.trim()
 
   if parsed.dependencies
-    context.on 'change:' + parsed.dependencies.join(' change:'), changeCallback
+    for dep in parsed.dependencies
+      if dep[0] is '$'
+        split = dep.split('.')
+        singletonName = split.substring 1
+        singleton = context.liveTemplate.singletons[singletonName]
+        propertyName = split.slice(1).join '.'
+        context.listenTo singleton, "change:#{ propertyName }"
+      else if dep.indexOf('$window.') isnt 0 and dep.indexOf('$view.') isnt 0
+        context.on "change:#{ dep }", changeCallback
 
   changeCallback()
 
@@ -79,7 +94,6 @@ stripBoundTag = ($el) ->
   $el.remove() unless config.dontStripElements
   $contents: $contents
   $placeholder: $placeholder
-
 
 # Allow coffeescript! if compiling have separate flag to first
 #    coffee compile
@@ -94,9 +108,20 @@ stripBoundTag = ($el) ->
 #
 getProperty = (context, keypath) ->
   if keypath.indexOf('$window.') is 0
-    for value in keyPath.split
+    res = window
+    for value in keypath.split('.').slice 1
       res = res[value] if res
     res
+  else if keypath.indexOf('$view.') is 0
+    res = @
+    for value in keypath.split('.').slice 1
+      res = res[value] if res
+    res
+  else if keypath[0] is '$'
+    split = keypath.split '.'
+    singleton = keypath[0]
+    try
+      context.liveTemplate.singletons[singleton].get split.slice(1).join '.'
   else
     try
       context.get keypath
@@ -176,14 +201,17 @@ ifUnlessHelper = (context, binding, $el, inverse) ->
   $contents = stripped.$contents
   $placeholder = stripped.$placeholder
 
-  isInserted = false
+  isInserted = true
   bindExpression context, binding, (result) =>
     result = not result if inverse
 
     if result and not isInserted
       $contents.insertAfter $placeholder
+      hiddenDOM = context.liveTemplate.hiddenDOM
+      hiddenDOM.splice hiddenDOM.indexOf($contents), 1
       isInserted = true
     else if not result and isInserted
+      context.liveTemplate.hiddenDOM.push $contents
       $contents.remove()
       isInserted = false
 
@@ -203,7 +231,6 @@ templateHelpers =
 
   unless: (context, binding, $el) ->
     ifUnlessHelper arguments..., true
-
 
   text: (context, binding, $el) ->
     bindExpression context, binding, (result) =>
@@ -245,4 +272,5 @@ _.extend liveTemplates,
     $template.contents()
 
 liveTemplates.helpers = templateHelpers
+liveTemplates.config = config
 Backbone.extensions.view.liveTemplates = liveTemplates

@@ -13,13 +13,13 @@
     <script>
       window.View = Backbone.View.extend({
         el: document.body,
-        template: '<div class="{{hi}}">HI! {{yo}} {{#if foo}} bar {{/if}}</div>'
+        template: '<div class="{{hi}}">HI! {{ foo( bar ) }} {{#if foo("hi")}} bar {{/if}}</div>'
       });
-      window.view = new View();
-      view.state = new Backbone.Model();
+      window.view = new View;
+      view.state = new Backbone.Model;
       view.get = function () { return this.state.get.apply(this.state, arguments); };
-      view.set = function () { return this.state.set.apply(this.state, arguments); };
-      view.state.on('all', function () { view.trigger.apply(view, arguments); })
+      view.set = function () { this.state.set.apply(this.state, arguments); return this; };
+      view.state.on('all', function () { view.trigger.apply(view, arguments); });
       Backbone.extensions.view.liveTemplates.call(view);
     </script>
   </body>
