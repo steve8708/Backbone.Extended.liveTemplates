@@ -9,7 +9,7 @@ config =
   dontRemoveAttributes: false
   dontStripElements: false
   logExpressionErrors: true
-  logCompiledTemplate: false
+  logCompiledTemplate: true
 
 expressionFunctions = {}
 
@@ -86,18 +86,16 @@ parseExpression = (context, expression) ->
     if expressionFunctions[newExpressionString]
       fn = expressionFunctions[newExpressionString]
     else
-      fn = new Function 'context', 'getProperty', 'expression', 'config',
-        "try {
-          return ( #{ newExpressionString } )
-        }
-        catch (error) {
-          if ( config.logExpressionErrors )
-            console.info(
-              '[INFO] Template error caught: '       + '\\n' +
-              '       Expression: ' + expression     + '\\n' +
-              '       Message: '    + error.message
-            );
-        }"
+      try
+        fn = new Function 'context', 'getProperty',
+          "return (#{newExpressionString})"
+      catch error
+        error.message =                     "\n" +
+          "    LiveTemplate parse error:     \n" +
+          "        error: #{ error.message } \n" +
+          "        expression: #{ expression }"
+        throw error
+
       expressionFunctions[newExpressionString] = fn
 
   string: expression
@@ -107,7 +105,16 @@ parseExpression = (context, expression) ->
 
 getExpressionValue = (context, parsed, expression) ->
   if parsed.isExpression
-    res = parsed.fn context, getProperty, expression, config
+    try
+      res = parsed.fn context, getProperty, expression, config
+    catch error
+      if config.logExpressionErrors
+        console.info (
+          "[INFO] Template error caught:      \n" +
+          "       Expression: #{ expression } \n" +
+          "       Message: #{ error.message } \n"
+        )
+
     if typeof res is 'string' then deserialize res else res
   else
     context.get expression.trim()
@@ -172,6 +179,7 @@ getProperty = (context, keypath, localOptions) ->
     try
       context.get keypath
 
+
 # Template Replacers - - - - - - - - - - - - - - - - - - - -
 
 # TODO:
@@ -229,7 +237,7 @@ templateReplacers = [
       expression: (match.substring 2, match.length - 2).trim()
     ]
 
-    """<bind data-bind='#{ attribute }'></bind>"""
+    """<bound data-bind='#{ attribute }'></bound>"""
 ]
 
 replaceTemplateBlocks = (context, template) ->
@@ -336,8 +344,11 @@ templateHelpers =
     ifUnlessHelper arguments..., true
 
   text: (context, binding, $el) ->
+    stripped = stripBoundTag $el
+    stripped.$contents.remove()
+    textNode = stripped.$placeholder[0]
     bindExpression context, binding.expression, (result) =>
-      $el.text result or ''
+      textNode.textContent = result or ''
 
   outlet: (context, binding, $el) ->
     parsed = parseExpression context, binding.expression

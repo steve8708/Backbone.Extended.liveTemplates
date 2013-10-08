@@ -13,7 +13,7 @@
     dontRemoveAttributes: false,
     dontStripElements: false,
     logExpressionErrors: true,
-    logCompiledTemplate: false
+    logCompiledTemplate: true
   };
 
   expressionFunctions = {};
@@ -119,7 +119,7 @@
   };
 
   parseExpression = function(context, expression) {
-    var dependencies, expressionIsNotSimpleGetter, fn, newExpressionString, _ref;
+    var dependencies, error, expressionIsNotSimpleGetter, fn, newExpressionString, _ref;
     if (isExpression(expression)) {
       expressionIsNotSimpleGetter = true;
     }
@@ -128,7 +128,13 @@
       if (expressionFunctions[newExpressionString]) {
         fn = expressionFunctions[newExpressionString];
       } else {
-        fn = new Function('context', 'getProperty', 'expression', 'config', "try {          return ( " + newExpressionString + " )        }        catch (error) {          if ( config.logExpressionErrors )            console.info(              '[INFO] Template error caught: '       + '\\n' +              '       Expression: ' + expression     + '\\n' +              '       Message: '    + error.message            );        }");
+        try {
+          fn = new Function('context', 'getProperty', "return (" + newExpressionString + ")");
+        } catch (_error) {
+          error = _error;
+          error.message = "\n" + "    LiveTemplate parse error:     \n" + ("        error: " + error.message + " \n") + ("        expression: " + expression);
+          throw error;
+        }
         expressionFunctions[newExpressionString] = fn;
       }
     }
@@ -141,9 +147,16 @@
   };
 
   getExpressionValue = function(context, parsed, expression) {
-    var res;
+    var error, res;
     if (parsed.isExpression) {
-      res = parsed.fn(context, getProperty, expression, config);
+      try {
+        res = parsed.fn(context, getProperty, expression, config);
+      } catch (_error) {
+        error = _error;
+        if (config.logExpressionErrors) {
+          console.info("[INFO] Template error caught:      \n" + ("       Expression: " + expression + " \n") + ("       Message: " + error.message + " \n"));
+        }
+      }
       if (typeof res === 'string') {
         return deserialize(res);
       } else {
@@ -284,7 +297,7 @@
             expression: (match.substring(2, match.length - 2)).trim()
           }
         ]);
-        return "<bind data-bind='" + attribute + "'></bind>";
+        return "<bound data-bind='" + attribute + "'></bound>";
       }
     }
   ];
@@ -408,9 +421,13 @@
       return ifUnlessHelper.apply(null, __slice.call(arguments).concat([true]));
     },
     text: function(context, binding, $el) {
-      var _this = this;
+      var stripped, textNode,
+        _this = this;
+      stripped = stripBoundTag($el);
+      stripped.$contents.remove();
+      textNode = stripped.$placeholder[0];
       return bindExpression(context, binding.expression, function(result) {
-        return $el.text(result || '');
+        return textNode.textContent = result || '';
       });
     },
     outlet: function(context, binding, $el) {
