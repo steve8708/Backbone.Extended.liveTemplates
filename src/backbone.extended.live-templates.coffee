@@ -1,12 +1,4 @@
-Backbone = @Backbone or typeof require is 'function' and require 'backbone'
-
-config =
-  dontRemoveAttributes: false
-  dontStripElements: false
-  logExpressionErrors: false
-
-expressionFunctions = {}
-
+   bvvb
 isExpression = (string) -> not /^[$a-z_\.]+$/.test string.trim()
 
 # Utils - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -69,9 +61,11 @@ bindExpression = (context, binding, callback) ->
 
   changeCallback = ->
     if parsed.isExpression
-      callback parsed.fn context, getProperty, binding.expression, config
+      res = parsed.fn context, getProperty, binding.expression, config
+      if callback then callback res else res
     else
-      context.get binding.expression.trim()
+      res = context.get binding.expression.trim()
+      if callback then callback res else res
 
   if parsed.dependencies
     for dep in parsed.dependencies
@@ -217,42 +211,49 @@ ifUnlessHelper = (context, binding, $el, inverse) ->
 templateHelpers =
   each: (context, binding, $el) ->
     $placeholder = $(document.createTextNode '').insertBefore $el
-    stripped = stripBoundTag $el
     template = $el.html()
+    $el.empty()
+    stripped = stripBoundTag $el
     $placeholder = stripped.$placeholder
     split = binding.expression.split ' '
 
     # _.last is used here for {{#each foo in bar}}
-    value = getProperty context, _.last split
+    keyName = _.last split
+    value = getProperty context, keyName
     inSyntax = _.contains binding.expression, ' in '
     propertyMap = split[0] if inSyntax
     collection = null
+    oldValue = null
 
     items = []
+    window.items = items
 
     insertItem = (model) =>
+      # MAJOR FIXME: this won't accept
+      $item = liveTemplates.init template, model
       items.push $item
+      $item.insertBefore $placeholder
 
     removeItem = ($el) =>
       $el.remove()
       items.splice items.indexOf($el), 1
 
+    reset = (value) =>
+      item.remove() for item in items
+      items = []
+      value.forEach insertItem if value and value.forEach
+
     render = (value) =>
-      return unless value
-      if not value.forEach
-        console.info "'each' tag only works with arrays or Backbone " +
-          "collections, you passed: #{ JSON.stringify value }"
-        return
+      reset value
+      @stopListening oldValue if oldValue
 
-      value.forEach (item, index) =>
-        if value.on
-          @listenTo value, 'add', insertItem
-          @listenTo value, 'remove', removeItem
-          @listenTo value, 'reset', =>
-            removeItem item for item in items
-            value.forEach insertItem
+      if value and value.on
+        @listenTo value, 'add', insertItem
+        @listenTo value, 'remove', removeItem
+        @listenTo value, 'reset', => reset value
 
-    render value if value?
+      oldValue = value
+
     bindExpression context, binding, render
 
   attribute: (context, binding, $el) ->

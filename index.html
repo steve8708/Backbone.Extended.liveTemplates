@@ -13,7 +13,7 @@
     <script>
       window.View = Backbone.View.extend({
         el: document.body,
-        template: '<div class="{{hi}}">HI! {{ foo( bar ) }} {{#if foo("hi")}} bar {{/if}}</div>'
+        template: '<div>{{#each sup}} yo {{/each}}</div> <div class="{{hi}}">HI! {{ foo( bar ) }} {{#if foo("hi")}} bar {{/if}}</div>'
       });
       window.view = new View;
       view.state = new Backbone.Model;

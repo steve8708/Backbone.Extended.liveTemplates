@@ -88,10 +88,21 @@
     var changeCallback, dep, parsed, propertyName, singleton, singletonName, split, _i, _len, _ref;
     parsed = parseExpression(context, binding.expression);
     changeCallback = function() {
+      var res;
       if (parsed.isExpression) {
-        return callback(parsed.fn(context, getProperty, binding.expression, config));
+        res = parsed.fn(context, getProperty, binding.expression, config);
+        if (callback) {
+          return callback(res);
+        } else {
+          return res;
+        }
       } else {
-        return context.get(binding.expression.trim());
+        res = context.get(binding.expression.trim());
+        if (callback) {
+          return callback(res);
+        } else {
+          return res;
+        }
       }
     };
     if (parsed.dependencies) {
@@ -264,53 +275,59 @@
 
   templateHelpers = {
     each: function(context, binding, $el) {
-      var $placeholder, collection, inSyntax, insertItem, items, propertyMap, removeItem, render, split, stripped, template, value,
+      var $placeholder, collection, inSyntax, insertItem, items, keyName, oldValue, propertyMap, removeItem, render, reset, split, stripped, template, value,
         _this = this;
       $placeholder = $(document.createTextNode('')).insertBefore($el);
-      stripped = stripBoundTag($el);
       template = $el.html();
+      $el.empty();
+      stripped = stripBoundTag($el);
       $placeholder = stripped.$placeholder;
       split = binding.expression.split(' ');
-      value = getProperty(context, _.last(split));
+      keyName = _.last(split);
+      value = getProperty(context, keyName);
       inSyntax = _.contains(binding.expression, ' in ');
       if (inSyntax) {
         propertyMap = split[0];
       }
       collection = null;
+      oldValue = null;
       items = [];
+      window.items = items;
       insertItem = function(model) {
-        return items.push($item);
+        var $item;
+        $item = liveTemplates.init(template, model);
+        items.push($item);
+        return $item.insertBefore($placeholder);
       };
       removeItem = function($el) {
         $el.remove();
         return items.splice(items.indexOf($el), 1);
       };
-      render = function(value) {
-        if (!value) {
-          return;
+      reset = function(value) {
+        var item, _i, _len;
+        for (_i = 0, _len = items.length; _i < _len; _i++) {
+          item = items[_i];
+          item.remove();
         }
-        if (!value.forEach) {
-          console.info("'each' tag only works with arrays or Backbone " + ("collections, you passed: " + (JSON.stringify(value))));
-          return;
+        items = [];
+        if (value && value.forEach) {
+          return value.forEach(insertItem);
         }
-        return value.forEach(function(item, index) {
-          if (value.on) {
-            _this.listenTo(value, 'add', insertItem);
-            _this.listenTo(value, 'remove', removeItem);
-            return _this.listenTo(value, 'reset', function() {
-              var _i, _len;
-              for (_i = 0, _len = items.length; _i < _len; _i++) {
-                item = items[_i];
-                removeItem(item);
-              }
-              return value.forEach(insertItem);
-            });
-          }
-        });
       };
-      if (value != null) {
-        render(value);
-      }
+      render = function(value) {
+        reset(value);
+        if (oldValue) {
+          _this.stopListening(oldValue);
+        }
+        if (value && value.on) {
+          _this.listenTo(value, 'add', insertItem);
+          _this.listenTo(value, 'remove', removeItem);
+          _this.listenTo(value, 'reset', function() {
+            return reset(value);
+          });
+        }
+        return oldValue = value;
+      };
       return bindExpression(context, binding, render);
     },
     attribute: function(context, binding, $el) {
