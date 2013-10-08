@@ -3,6 +3,19 @@
   <head>
   </head>
   </body>
+    <div id="main" role="main">
+      {{#each sup }}
+        <div>{{ yo }}</div>
+      {{/each}}
+      {{bar}}
+      <div class="{{hi}}">
+        HI! {{ foo( bar ) }}
+
+        {{#if foo("hi")}}
+          bar
+        {{/if}}
+      </div>
+    </div>
     <script src="test/vendor/jquery.js"></script>
     <script src="test/vendor/lodash.js"></script>
     <script src="test/vendor/backbone.js"></script>
@@ -11,11 +24,7 @@
     </script>
     <script src="backbone.extended.live-templates.js"></script>
     <script>
-      window.View = Backbone.View.extend({
-        el: document.body,
-        template: '<div>{{#each sup}} yo {{/each}}</div> <div class="{{hi}}">HI! {{ foo( bar ) }} {{#if foo("hi")}} bar {{/if}}</div>'
-      });
-      window.view = new View;
+      window.view = new Backbone.View({ el: document.getElementById('main') });
       view.state = new Backbone.Model;
       view.get = function () { return this.state.get.apply(this.state, arguments); };
       view.set = function () { this.state.set.apply(this.state, arguments); return this; };

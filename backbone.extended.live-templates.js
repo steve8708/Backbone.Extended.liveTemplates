@@ -1,5 +1,5 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes,
+  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes,
     __slice = [].slice;
 
   Backbone = this.Backbone || typeof require === 'function' && require('backbone');
@@ -7,18 +7,10 @@
   config = {
     dontRemoveAttributes: false,
     dontStripElements: false,
-    logExpressionErrors: false
+    logExpressionErrors: true
   };
 
-  expressionFunctions = {};
-
-  isExpression = function(string) {
-    return !/^[$a-z_\.]+$/.test(string.trim());
-  };
-
-  escapeForRegex = function(str) {
-    return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, '\\$&');
-  };
+  window.expressionFunctions = {};
 
   escapeQuotes = function(string) {
     return string.replace(/'/g, "\\'");
@@ -36,12 +28,41 @@
     return JSON.parse(unescapeQuotes(string || ''));
   };
 
+  isExpression = function(string) {
+    return !/^[$a-z_\.]+$/.test(string.trim());
+  };
+
+  escapeForRegex = function(str) {
+    return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, '\\$&');
+  };
+
+  deserialize = function(string) {
+    var num;
+    string = string.trim();
+    if (string === 'null') {
+      return null;
+    }
+    if (string === 'undefined') {
+      return void 0;
+    }
+    if (string === 'true') {
+      return true;
+    }
+    if (string === 'false') {
+      return false;
+    }
+    if (!isNaN((num = Number(value)))) {
+      return num;
+    }
+    return string;
+  };
+
   liveTemplates = function(context, config, options) {
     var $template, template, _base;
     if (config == null) {
       config = {};
     }
-    template = this.template || config.template;
+    template = this.template || config.template || this.$el.html();
     this.liveTemplate = {
       hiddenDOM: [],
       singletons: config.singletons || {}
@@ -68,6 +89,7 @@
     if (isExpression(expression)) {
       expressionIsExpression = true;
     }
+    console.log('expressionIsExpression', expressionIsExpression, expression);
     if (expressionIsExpression) {
       if (expressionFunctions[newExpressionString]) {
         fn = expressionFunctions[newExpressionString];
@@ -91,6 +113,9 @@
       var res;
       if (parsed.isExpression) {
         res = parsed.fn(context, getProperty, binding.expression, config);
+        if (typeof res === 'string') {
+          res = deserialize(res);
+        }
         if (callback) {
           return callback(res);
         } else {
@@ -174,8 +199,13 @@
 
   templateReplacers = [
     {
-      regex: /\{\{![\s|\S]*?\}\}/g,
-      replace: function() {
+      regex: /\{\{![\s\S]*?\}\}/g,
+      replace: function(match) {
+        return '';
+      }
+    }, {
+      regex: /<!--[\s\S]*?-->/g,
+      replace: function(match) {
         return '';
       }
     }, {
@@ -198,23 +228,24 @@
               return '';
             }
           });
-          return bindings.push({
+          bindings.push({
             type: 'attribute',
-            expression: attrExpressionString,
+            expression: attrExpressionString.trim(),
             attribute: attrName
           });
+          return '';
         });
         replacement = replacement.replace(/(\/?>)/g, " data-bind=' " + (encodeAttribute(bindings)) + "' $1");
         return replacement;
       }
     }, {
-      regex: /\{\{.*?\}\}/,
+      regex: /\{\{.*?\}\}/g,
       replace: function(context, match) {
         var attribute;
         attribute = encodeAttribute([
           {
             type: 'text',
-            expression: match.substring(2, match.length - 2)
+            expression: (match.substring(2, match.length - 2)).trim()
           }
         ]);
         return "<bind data-bind='" + attribute + "'></bind>";
@@ -238,7 +269,7 @@
         attribute = encodeAttribute([
           {
             type: spaceSplit[0].substring(1),
-            expression: spaceSplit.slice(1).join(" ")
+            expression: (spaceSplit.slice(1).join(" ")).trim()
           }
         ]);
         return "<bound data-bind='" + attribute + "'>" + body + "</bound>";
@@ -277,9 +308,7 @@
     each: function(context, binding, $el) {
       var $placeholder, collection, inSyntax, insertItem, items, keyName, oldValue, propertyMap, removeItem, render, reset, split, stripped, template, value,
         _this = this;
-      $placeholder = $(document.createTextNode('')).insertBefore($el);
       template = $el.html();
-      $el.empty();
       stripped = stripBoundTag($el);
       $placeholder = stripped.$placeholder;
       split = binding.expression.split(' ');
@@ -360,14 +389,14 @@
       return bound;
     },
     compileTemplate: function(template, context) {
-      var replacer, _i, _len,
+      var index, replacer, _i, _len,
         _this = this;
       if (template == null) {
         template = '';
       }
       template = replaceTemplateBlocks(context, template);
-      for (_i = 0, _len = templateReplacers.length; _i < _len; _i++) {
-        replacer = templateReplacers[_i];
+      for (index = _i = 0, _len = templateReplacers.length; _i < _len; index = ++_i) {
+        replacer = templateReplacers[index];
         template = template.replace(replacer.regex, function() {
           var args;
           args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];

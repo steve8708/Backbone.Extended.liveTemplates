@@ -1,18 +1,40 @@
-   bvvb
-isExpression = (string) -> not /^[$a-z_\.]+$/.test string.trim()
+# Setup - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+Backbone = @Backbone or typeof require is 'function' and require 'backbone'
+
+config =
+  dontRemoveAttributes: false
+  dontStripElements: false
+  logExpressionErrors: true
+
+window.expressionFunctions = {}
+
 
 # Utils - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-escapeForRegex = (str) ->
-  str.replace /[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, '\\$&'
 
 escapeQuotes    = (string) -> string.replace /'/g, "\\'"
 unescapeQuotes  = (string) -> string.replace /\\'/g, "'"
 encodeAttribute = (object) -> escapeQuotes JSON.stringify object
 decodeAttribute = (string) -> JSON.parse unescapeQuotes string or ''
+isExpression = (string) -> not /^[$a-z_\.]+$/.test string.trim()
+
+escapeForRegex = (str) ->
+  str.replace /[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, '\\$&'
+
+deserialize = (string) ->
+  string = string.trim()
+  if string is 'null' then return null
+  if string is 'undefined' then return undefined
+  if string is 'true' then return true
+  if string is 'false' then return false
+  if not isNaN (num = Number value) then return num
+  string
+
+
+# LiveTemplates - - - - - - - - - - - - - - - - - - - - - -
 
 liveTemplates = (context, config = {}, options) ->
-  template = @template or config.template
+  template = @template or config.template or @$el.html()
   @liveTemplate = hiddenDOM: [], singletons: config.singletons or {}
   @liveTemplate.singletons.view ?= @
   $template = liveTemplates.init template, @
@@ -35,6 +57,8 @@ parseExpression = (context, expression) ->
 
   if isExpression expression
     expressionIsExpression = true
+
+  console.log 'expressionIsExpression', expressionIsExpression, expression
 
   if expressionIsExpression
     if expressionFunctions[newExpressionString]
@@ -62,6 +86,7 @@ bindExpression = (context, binding, callback) ->
   changeCallback = ->
     if parsed.isExpression
       res = parsed.fn context, getProperty, binding.expression, config
+      res = deserialize res if typeof res is 'string'
       if callback then callback res else res
     else
       res = context.get binding.expression.trim()
@@ -123,15 +148,25 @@ getProperty = (context, keypath) ->
 #   {{> partial}}
 #   {{* static}}   text replacements
 #   {{% special}}  e.g. {{%outlet 'foobar'}}
+#
+#   Compress (strip whitespace form) HTML
+#
+#   Coffeescript
+#
+#   Blocks in attributes
+#     e.g. class="{{#if foo}} foo {{/if}}"
+#
+#   Wrap attributes
+#     e.g. <input type="text" {{ validate ? 'validate' : '' }} >
+#
 templateReplacers = [
-  # Comments
-  regex: /\{\{![\s|\S]*?\}\}/g
-  replace: -> ''
-# ,
-#   # Wrapping attributes
-#   #   e.g. <input {{ validate ? 'validate' : '' }}>
-#   regex: /<[^<>]*?\{\{.+?\}\}[^<]*?>/g
-#   replace: (context, match) -> # TODO
+  # Hbs comments
+  regex: /\{\{![\s\S]*?\}\}/g
+  replace: (match) -> ''
+,
+  # HTML comments
+  regex: /<!--[\s\S]*?-->/g
+  replace: (match) -> '' # TODO: config to preserve comments
 ,
   regex: /<([a-z\-_]+?)[^<>]*?\{\{.+?\}\}[^<]*?>/gi
   replace: (context, match, tagName) ->
@@ -146,8 +181,10 @@ templateReplacers = [
 
       bindings.push
         type: 'attribute'
-        expression: attrExpressionString
+        expression: attrExpressionString.trim()
         attribute: attrName
+
+      ''
 
     replacement = replacement.replace /(\/?>)/g,
       """ data-bind=' #{ encodeAttribute bindings }' $1"""
@@ -155,11 +192,11 @@ templateReplacers = [
 ,
   # Text tags
   #   e.g. {{ foo }}
-  regex: /\{\{.*?\}\}/
+  regex: /\{\{.*?\}\}/g
   replace: (context, match) ->
     attribute = encodeAttribute [
       type: 'text'
-      expression: match.substring 2, match.length - 2
+      expression: (match.substring 2, match.length - 2).trim()
     ]
 
     """<bind data-bind='#{ attribute }'></bind>"""
@@ -181,7 +218,7 @@ replaceTemplateBlocks = (context, template) ->
       attribute = encodeAttribute [
         # susbtring 1 to remove the # (as in {{#if}})
         type: spaceSplit[0].substring 1
-        expression: spaceSplit.slice(1).join " "
+        expression: (spaceSplit.slice(1).join " ").trim()
       ]
 
       """<bound data-bind='#{ attribute }'>#{ body }</bound>"""
@@ -209,10 +246,11 @@ ifUnlessHelper = (context, binding, $el, inverse) ->
       isInserted = false
 
 templateHelpers =
+  # TODO:
+  #     {{$this}}
+  #     {{$index}}
   each: (context, binding, $el) ->
-    $placeholder = $(document.createTextNode '').insertBefore $el
     template = $el.html()
-    $el.empty()
     stripped = stripBoundTag $el
     $placeholder = stripped.$placeholder
     split = binding.expression.split ' '
@@ -281,7 +319,7 @@ _.extend liveTemplates,
 
   compileTemplate: (template = '', context) ->
     template = replaceTemplateBlocks context, template
-    for replacer in templateReplacers
+    for replacer, index in templateReplacers
       template = template.replace replacer.regex, (args...) =>
         replacer.replace context, args...
     template
