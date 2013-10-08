@@ -1,5 +1,5 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, reservedWords, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes,
+  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, reservedWords, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes, wrapExpressionGetters,
     __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; },
     __slice = [].slice;
 
@@ -80,16 +80,13 @@
     return this.$el.empty().append($template);
   };
 
-  parseExpression = function(context, expression) {
-    var dependencies, expressionIsNotSimpleGetter, fn, index, item, newExpressionArray, newExpressionString, regex, splitReplace, stringSplit, strings, _i, _len, _ref,
+  wrapExpressionGetters = function(expression) {
+    var dependencies, index, item, newExpressionArray, newExpressionString, regex, splitReplace, stringSplit, strings, _i, _len, _ref,
       _this = this;
-    regex = /([$\w\.])+/gi;
+    regex = /[$\w][$\w\d\.]*/gi;
     dependencies = [];
     stringSplit = expression.split(/'[\s\S]*?'/);
     strings = (expression.match(/'[\s\S]*?'/g)) || [];
-    expression = expression.replace(/'[\S\s]+?'/, function(match) {
-      return match.replace(/(\s)/g, '\\$1');
-    });
     splitReplace = stringSplit.map(function(string) {
       return string.replace(regex, function(keypath) {
         if (__indexOf.call(reservedWords, keypath) >= 0 || /'|"/.test(keypath)) {
@@ -113,10 +110,16 @@
       }
     }
     newExpressionString = newExpressionArray.join(' ');
+    return [newExpressionString, dependencies];
+  };
+
+  parseExpression = function(context, expression) {
+    var dependencies, expressionIsNotSimpleGetter, fn, newExpressionString, _ref;
     if (isExpression(expression)) {
       expressionIsNotSimpleGetter = true;
     }
     if (expressionIsNotSimpleGetter) {
+      _ref = wrapExpressionGetters(expression), newExpressionString = _ref[0], dependencies = _ref[1];
       if (expressionFunctions[newExpressionString]) {
         fn = expressionFunctions[newExpressionString];
       } else {
@@ -336,15 +339,15 @@
 
   templateHelpers = {
     each: function(context, binding, $el) {
-      var $placeholder, collection, inSyntax, insertItem, items, keyName, oldValue, propertyMap, removeItem, render, reset, split, stripped, template, value,
+      var $placeholder, collection, inSplit, inSyntax, insertItem, items, keyName, oldValue, propertyMap, removeItem, render, reset, stripped, template, value,
         _this = this;
       template = $el.html();
       stripped = stripBoundTag($el);
       $placeholder = stripped.$placeholder;
-      split = binding.expression.split(' ');
-      keyName = _.last(split);
-      value = getProperty(context, keyName);
+      inSplit = binding.expression.split(' in ');
       inSyntax = _.contains(binding.expression, ' in ');
+      keyName = inSyntax ? inSplit[1] : binding.expression;
+      value = getProperty(context, keyName);
       if (inSyntax) {
         propertyMap = split[0];
       }

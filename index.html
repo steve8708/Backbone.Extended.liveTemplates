@@ -8,7 +8,7 @@
         <div>{{ yo }}</div>
       {{/each}}
       {{bar}}
-      <div class="{{ true ? test : 'goodbye' }} waaa">
+      <div class="{{ true ? test: 'goodbye' }} waaa">
         HI! {{ foo( bar ) }}
 
         {{ true ? 'true' : 'false' }}
@@ -17,12 +17,6 @@
           bar
         {{/if}}
       </div>
-
-
-
-
-
-
     </div>
     <script src="test/vendor/jquery.js"></script>
     <script src="test/vendor/lodash.js"></script>

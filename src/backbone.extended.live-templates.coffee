@@ -46,21 +46,20 @@ liveTemplates = (context, config = {}, options) ->
   @$el.empty().append $template
 
 
-# Helepers - - - - - - - - - - - - - - - - - - - - - - - - -
+# Helpers - - - - - - - - - - - - - - - - - - - - - - - - -
 
-parseExpression = (context, expression) ->
-  regex = /([$\w\.])+/gi
+# FIXME: there has to be a cleaner, higher performance way of doing this
+#     with a regex rather than looping through an array
+wrapExpressionGetters = (expression) ->
+  regex = /[$\w][$\w\d\.]*/gi
   dependencies = []
 
   stringSplit = expression.split /'[\s\S]*?'/
   strings = ( expression.match /'[\s\S]*?'/g ) or []
-  expression = expression.replace /'[\S\s]+?'/, (match) ->
-    match.replace /(\s)/g, '\\$1'
 
   splitReplace = stringSplit.map (string) =>
-    string.replace regex, (keypath) =>
+    string.replace regex, (keypath) ->
       return keypath if keypath in reservedWords or /'|"/.test keypath
-
       if keypath.indexOf('$window.') isnt 0 and keypath.indexOf('$view.') isnt 0
         dependencies.push keypath
       "getProperty( context, '#{ keypath }' )"
@@ -71,10 +70,15 @@ parseExpression = (context, expression) ->
     newExpressionArray.push strings[index] if strings[index]
   newExpressionString = newExpressionArray.join ' '
 
+  [ newExpressionString, dependencies ]
+
+parseExpression = (context, expression) ->
   if isExpression expression
     expressionIsNotSimpleGetter = true
 
   if expressionIsNotSimpleGetter
+    [ newExpressionString, dependencies ] = wrapExpressionGetters expression
+
     if expressionFunctions[newExpressionString]
       fn = expressionFunctions[newExpressionString]
     else
@@ -236,7 +240,7 @@ replaceTemplateBlocks = (context, template) ->
       tag = openTag.substring 2, openTag.length - 2
       spaceSplit = tag.split " "
       attribute = encodeAttribute [
-        # susbtring 1 to remove the # (as in {{#if}})
+        # susbtring 1 to remove the '#',  as in {{#if}}
         type: spaceSplit[0].substring 1
         expression: (spaceSplit.slice(1).join " ").trim()
       ]
@@ -270,18 +274,16 @@ templateHelpers =
   #     {{$this}}
   #     {{$index}}
   each: (context, binding, $el) ->
-    template = $el.html()
-    stripped = stripBoundTag $el
+    template     = $el.html()
+    stripped     = stripBoundTag $el
     $placeholder = stripped.$placeholder
-    split = binding.expression.split ' '
-
-    # _.last is used here for {{#each foo in bar}}
-    keyName = _.last split
-    value = getProperty context, keyName
-    inSyntax = _.contains binding.expression, ' in '
-    propertyMap = split[0] if inSyntax
-    collection = null
-    oldValue = null
+    inSplit      = binding.expression.split ' in '
+    inSyntax     = _.contains binding.expression, ' in '
+    keyName      = if inSyntax then inSplit[1] else binding.expression
+    value        = getProperty context, keyName
+    propertyMap  = split[0] if inSyntax
+    collection   = null
+    oldValue     = null
 
     items = []
     window.items = items
