@@ -5,9 +5,9 @@
   Backbone = this.Backbone || typeof require === 'function' && require('backbone');
 
   config = {
-    dontRemoveAttributes: true,
-    dontStripElements: true,
-    logExpressionErrors: true
+    dontRemoveAttributes: false,
+    dontStripElements: false,
+    logExpressionErrors: false
   };
 
   expressionFunctions = {};
@@ -264,10 +264,54 @@
 
   templateHelpers = {
     each: function(context, binding, $el) {
-      var $contents, $placeholder, stripped;
+      var $placeholder, collection, inSyntax, insertItem, items, propertyMap, removeItem, render, split, stripped, template, value,
+        _this = this;
+      $placeholder = $(document.createTextNode('')).insertBefore($el);
       stripped = stripBoundTag($el);
-      $contents = stripped.$contents;
-      return $placeholder = stripped.$placeholder;
+      template = $el.html();
+      $placeholder = stripped.$placeholder;
+      split = binding.expression.split(' ');
+      value = getProperty(context, _.last(split));
+      inSyntax = _.contains(binding.expression, ' in ');
+      if (inSyntax) {
+        propertyMap = split[0];
+      }
+      collection = null;
+      items = [];
+      insertItem = function(model) {
+        return items.push($item);
+      };
+      removeItem = function($el) {
+        $el.remove();
+        return items.splice(items.indexOf($el), 1);
+      };
+      render = function(value) {
+        if (!value) {
+          return;
+        }
+        if (!value.forEach) {
+          console.info("'each' tag only works with arrays or Backbone " + ("collections, you passed: " + (JSON.stringify(value))));
+          return;
+        }
+        return value.forEach(function(item, index) {
+          if (value.on) {
+            _this.listenTo(value, 'add', insertItem);
+            _this.listenTo(value, 'remove', removeItem);
+            return _this.listenTo(value, 'reset', function() {
+              var _i, _len;
+              for (_i = 0, _len = items.length; _i < _len; _i++) {
+                item = items[_i];
+                removeItem(item);
+              }
+              return value.forEach(insertItem);
+            });
+          }
+        });
+      };
+      if (value != null) {
+        render(value);
+      }
+      return bindExpression(context, binding, render);
     },
     attribute: function(context, binding, $el) {
       var _this = this;

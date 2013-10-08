@@ -1,14 +1,13 @@
 Backbone = @Backbone or typeof require is 'function' and require 'backbone'
 
 config =
-  dontRemoveAttributes: true
-  dontStripElements: true
-  logExpressionErrors: true
+  dontRemoveAttributes: false
+  dontStripElements: false
+  logExpressionErrors: false
 
 expressionFunctions = {}
 
 isExpression = (string) -> not /^[$a-z_\.]+$/.test string.trim()
-
 
 # Utils - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -215,12 +214,46 @@ ifUnlessHelper = (context, binding, $el, inverse) ->
       $contents.remove()
       isInserted = false
 
-
 templateHelpers =
   each: (context, binding, $el) ->
+    $placeholder = $(document.createTextNode '').insertBefore $el
     stripped = stripBoundTag $el
-    $contents = stripped.$contents
+    template = $el.html()
     $placeholder = stripped.$placeholder
+    split = binding.expression.split ' '
+
+    # _.last is used here for {{#each foo in bar}}
+    value = getProperty context, _.last split
+    inSyntax = _.contains binding.expression, ' in '
+    propertyMap = split[0] if inSyntax
+    collection = null
+
+    items = []
+
+    insertItem = (model) =>
+      items.push $item
+
+    removeItem = ($el) =>
+      $el.remove()
+      items.splice items.indexOf($el), 1
+
+    render = (value) =>
+      return unless value
+      if not value.forEach
+        console.info "'each' tag only works with arrays or Backbone " +
+          "collections, you passed: #{ JSON.stringify value }"
+        return
+
+      value.forEach (item, index) =>
+        if value.on
+          @listenTo value, 'add', insertItem
+          @listenTo value, 'remove', removeItem
+          @listenTo value, 'reset', =>
+            removeItem item for item in items
+            value.forEach insertItem
+
+    render value if value?
+    bindExpression context, binding, render
 
   attribute: (context, binding, $el) ->
     bindExpression context, binding, (result) =>
