@@ -345,7 +345,7 @@
       stripped = stripBoundTag($el);
       $placeholder = stripped.$placeholder;
       inSplit = binding.expression.split(' in ');
-      inSyntax = _.contains(binding.expression, ' in ');
+      inSyntax = binding.expression.split(' ')[1] === 'in';
       keyName = inSyntax ? inSplit[1] : binding.expression;
       value = getProperty(context, keyName);
       if (inSyntax) {

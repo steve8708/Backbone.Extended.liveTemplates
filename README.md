@@ -14,12 +14,16 @@ Inspired by [handlebars](http://handlebarsjs.com/), [angularjs](http://angularjs
       {{/each}}
     </ul>
     <div class="{{ showExtraInfo ? 'active' : 'hidden' }} extra-info-container">
-      Hello {{ user.name || 'Anonymous' }}!
+      Hello {{ user.name ? user.name : 'Anonymous' }}!
 
       {{#if user.isLoggedIn() }}
         <div class="info"> Thanks for logging in!</div>
 
         {{#each mappedPerson in mapPeople( people ) }}
+      {{/if}}
+
+      {{#if user.type == 'brand' && user.subscriptionLevel == 'premium'}}
+        Thank you for being a premium brand!
       {{/if}}
     </div>
   </div>
