@@ -1,11 +1,15 @@
 # Setup - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-Backbone = @Backbone or typeof require is 'function' and require 'backbone'
+requireCompatible = typeof require is 'function'
+isNode = typeof module isnt 'undefined'
+
+Backbone = @Backbone or requireCompatible and require 'backbone'
 
 config =
   dontRemoveAttributes: false
   dontStripElements: false
   logExpressionErrors: true
+  logCompiledTemplate: false
 
 expressionFunctions = {}
 
@@ -82,7 +86,6 @@ parseExpression = (context, expression) ->
     if expressionFunctions[newExpressionString]
       fn = expressionFunctions[newExpressionString]
     else
-      console.log 'newExpressionString', newExpressionString
       fn = new Function 'context', 'getProperty', 'expression', 'config',
         "try {
           return ( #{ newExpressionString } )
@@ -169,6 +172,8 @@ getProperty = (context, keypath, localOptions) ->
     try
       context.get keypath
 
+# Template Replacers - - - - - - - - - - - - - - - - - - - -
+
 # TODO:
 #   {{> partial}}
 #   {{* static}}   text replacements
@@ -250,6 +255,9 @@ replaceTemplateBlocks = (context, template) ->
 
     mustacheBlocks = template.match mustacheBlockRe
   template
+
+
+# Template helpers - - - - - - - - - - - - - - - - - - - - -
 
 ifUnlessHelper = (context, binding, $el, inverse) ->
   stripped = stripBoundTag $el
@@ -352,7 +360,10 @@ _.extend liveTemplates,
     for replacer, index in templateReplacers
       template = template.replace replacer.regex, (args...) =>
         replacer.replace context, args...
-    console.log 'template', template
+
+    if config.logCompiledTemplate
+      console.info '[INFO] Compiled template:\n', template
+
     template
 
   createFragment: (template, context) ->
@@ -374,6 +385,17 @@ _.extend liveTemplates,
 
     $template.contents()
 
+
+# Export - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 liveTemplates.helpers = templateHelpers
 liveTemplates.config = config
-Backbone.extensions.view.liveTemplates = liveTemplates
+
+if Backbone and Backbone.extensions and Backbone.extensions.view
+  Backbone.extensions.view.liveTemplates = liveTemplates
+
+if isNode
+  module.exports = liveTemplates
+
+if requireCompatible and typeof define is 'function'
+  define 'live-templates', ['backbone', 'backbone.extended'] -> liveTemplates

@@ -1,14 +1,19 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getExpressionValue, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, reservedWords, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes, wrapExpressionGetters,
+  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getExpressionValue, getProperty, ifUnlessHelper, isExpression, isNode, liveTemplates, parseExpression, replaceTemplateBlocks, requireCompatible, reservedWords, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes, wrapExpressionGetters,
     __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; },
     __slice = [].slice;
 
-  Backbone = this.Backbone || typeof require === 'function' && require('backbone');
+  requireCompatible = typeof require === 'function';
+
+  isNode = typeof module !== 'undefined';
+
+  Backbone = this.Backbone || requireCompatible && require('backbone');
 
   config = {
     dontRemoveAttributes: false,
     dontStripElements: false,
-    logExpressionErrors: true
+    logExpressionErrors: true,
+    logCompiledTemplate: false
   };
 
   expressionFunctions = {};
@@ -123,7 +128,6 @@
       if (expressionFunctions[newExpressionString]) {
         fn = expressionFunctions[newExpressionString];
       } else {
-        console.log('newExpressionString', newExpressionString);
         fn = new Function('context', 'getProperty', 'expression', 'config', "try {          return ( " + newExpressionString + " )        }        catch (error) {          if ( config.logExpressionErrors )            console.info(              '[INFO] Template error caught: '       + '\\n' +              '       Expression: ' + expression     + '\\n' +              '       Message: '    + error.message            );        }");
         expressionFunctions[newExpressionString] = fn;
       }
@@ -443,7 +447,9 @@
           return replacer.replace.apply(replacer, [context].concat(__slice.call(args)));
         });
       }
-      console.log('template', template);
+      if (config.logCompiledTemplate) {
+        console.info('[INFO] Compiled template:\n', template);
+      }
       return template;
     },
     createFragment: function(template, context) {
@@ -476,6 +482,18 @@
 
   liveTemplates.config = config;
 
-  Backbone.extensions.view.liveTemplates = liveTemplates;
+  if (Backbone && Backbone.extensions && Backbone.extensions.view) {
+    Backbone.extensions.view.liveTemplates = liveTemplates;
+  }
+
+  if (isNode) {
+    module.exports = liveTemplates;
+  }
+
+  if (requireCompatible && typeof define === 'function') {
+    define('live-templates', ['backbone', 'backbone.extended'](function() {
+      return liveTemplates;
+    }));
+  }
 
 }).call(this);
