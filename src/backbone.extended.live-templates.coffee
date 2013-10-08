@@ -11,7 +11,8 @@ config =
   logExpressionErrors: true
   logCompiledTemplate: true
 
-expressionFunctions = {}
+expressionFunctionCache = {}
+templateCache = {}
 
 reservedWords = 'break case catch continue debugger default delete
   do else finally for function if in instanceof new return switch this
@@ -38,6 +39,14 @@ deserialize = (string) ->
   if not isNaN (num = Number string) then return num
   string
 
+zip = (arrays...) ->
+  res = []
+  arrayLengths = ( array.length for array in arrays )
+  for item, index in new Array Math.max arrayLengths...
+    for array in arrays
+      res.push item if ( item = array[index] )
+  res
+
 
 # LiveTemplates - - - - - - - - - - - - - - - - - - - - - -
 
@@ -54,7 +63,7 @@ liveTemplates = (context, config = {}, options) ->
 
 # FIXME: there has to be a cleaner, higher performance way of doing this
 #     with a regex rather than looping through an array
-wrapExpressionGetters = (expression) ->
+wrapExpressionGetters = (expression, scope) ->
   regex = /[$\w][$\w\d\.]*/gi
   dependencies = []
 
@@ -68,23 +77,20 @@ wrapExpressionGetters = (expression) ->
         dependencies.push keypath
       "getProperty( context, '#{ keypath }' )"
 
-  newExpressionArray = []
-  for item, index in new Array Math.max splitReplace.length, strings.length
-    newExpressionArray.push splitReplace[index] if splitReplace[index]
-    newExpressionArray.push strings[index] if strings[index]
-  newExpressionString = newExpressionArray.join ' '
+  newExpressionString = zip(splitReplace, strings).join ' '
 
   [ newExpressionString, dependencies ]
 
-parseExpression = (context, expression) ->
+parseExpression = (context, expression, scope) ->
   if isExpression expression
     expressionIsNotSimpleGetter = true
 
   if expressionIsNotSimpleGetter
-    [ newExpressionString, dependencies ] = wrapExpressionGetters expression
+    [ newExpressionString, dependencies ] = \
+      wrapExpressionGetters expression, scope
 
-    if expressionFunctions[newExpressionString]
-      fn = expressionFunctions[newExpressionString]
+    if expressionFunctionCache[newExpressionString]
+      fn = expressionFunctionCache[newExpressionString]
     else
       try
         fn = new Function 'context', 'getProperty',
@@ -96,14 +102,14 @@ parseExpression = (context, expression) ->
           "        expression: #{ expression }"
         throw error
 
-      expressionFunctions[newExpressionString] = fn
+      expressionFunctionCache[newExpressionString] = fn
 
   string: expression
   fn: fn
   dependencies: dependencies
   isExpression: expressionIsNotSimpleGetter
 
-getExpressionValue = (context, parsed, expression) ->
+getExpressionValue = (context, parsed, expression, scope) ->
   if parsed.isExpression
     try
       res = parsed.fn context, getProperty, expression, config
@@ -119,11 +125,11 @@ getExpressionValue = (context, parsed, expression) ->
   else
     context.get expression.trim()
 
-bindExpression = (context, expression, callback) ->
-  parsed = parseExpression context, expression
+bindExpression = (context, expression, scope, callback) ->
+  parsed = parseExpression context, expression, scope
 
   changeCallback = ->
-    value = getExpressionValue context, parsed, expression
+    value = getExpressionValue context, parsed, expression, scope
     if callback then callback value else value
 
   if parsed.dependencies
@@ -288,9 +294,8 @@ ifUnlessHelper = (context, binding, $el, inverse) ->
 
 templateHelpers =
   # TODO:
-  #     {{$this}}
   #     {{$index}}
-  each: (context, binding, $el) ->
+  each: (context, binding, $el, scope) ->
     template     = $el.html()
     stripped     = stripBoundTag $el
     $placeholder = stripped.$placeholder
@@ -301,13 +306,21 @@ templateHelpers =
     propertyMap  = inSplit[0] if inSyntax
     collection   = null
     oldValue     = null
+    currentValue = null
 
     items = []
     window.items = items
 
-    insertItem = (model) =>
+    insertItem = (model, index) =>
       # MAJOR FIXME: this won't accept
-      $item = liveTemplates.create template, model
+      scope =
+        model: model
+        mappings: {}
+        index: index
+
+      scope.mappings[propertyMap] = expression if inSyntax
+
+      $item = liveTemplates.create template, context, scope
       items.push $item
       $item.insertBefore $placeholder
 
@@ -316,6 +329,7 @@ templateHelpers =
       items.splice items.indexOf($el), 1
 
     reset = (value) =>
+      currentValue = value
       item.remove() for item in items
       items = []
       value.forEach insertItem if value and value.forEach
@@ -331,28 +345,28 @@ templateHelpers =
 
       oldValue = value
 
-    bindExpression context, expression, render
+    bindExpression context, expression, scope, render
 
-  attribute: (context, binding, $el) ->
-    bindExpression context, binding.expression, (result) =>
+  attribute: (context, binding, $el, scope) ->
+    bindExpression context, binding.expression, scope, (result) =>
       $el.attr binding.attribute, result or ''
 
-  if: (context, binding, $el) ->
+  if: (context, binding, $el, scope) ->
     ifUnlessHelper arguments...
 
-  unless: (context, binding, $el) ->
+  unless: (context, binding, $el, scope) ->
     ifUnlessHelper arguments..., true
 
-  text: (context, binding, $el) ->
+  text: (context, binding, $el, scope) ->
     stripped = stripBoundTag $el
     stripped.$contents.remove()
     textNode = stripped.$placeholder[0]
-    bindExpression context, binding.expression, (result) =>
+    bindExpression context, binding.expression, scope, (result) =>
       textNode.textContent = result or ''
 
-  outlet: (context, binding, $el) ->
-    parsed = parseExpression context, binding.expression
-    value = getExpressionValue context, parsed, binding.expression
+  outlet: (context, binding, $el, scope) ->
+    parsed = parseExpression context, binding.expression, scope
+    value = getExpressionValue context, parsed, binding.expression, scope
     @$[value] ?= $()
     @$[value].add $el
 
@@ -360,27 +374,30 @@ templateHelpers =
 # Public methods - - - - - - - - - - - - - - - - - - - - - -
 
 _.extend liveTemplates,
-  create: (template, context) ->
+  create: (template, context, scope) ->
     compiled = @compileTemplate template, context
     fragment = @createFragment compiled, context
-    bound = @bindFragment fragment, context
+    bound = @bindFragment fragment, context, scope
     bound
 
   compileTemplate: (template = '', context) ->
-    template = replaceTemplateBlocks context, template
+    return cached if ( cached = templateCache[template] )
+
+    newTemplate = replaceTemplateBlocks context, template
     for replacer, index in templateReplacers
-      template = template.replace replacer.regex, (args...) =>
+      newTemplate = newTemplate.replace replacer.regex, (args...) =>
         replacer.replace context, args...
 
     if config.logCompiledTemplate
-      console.info '[INFO] Compiled template:\n', template
+      console.info '[INFO] Compiled template:\n', newTemplate
 
-    template
+    templateCache[template] = newTemplate
+    newTemplate
 
   createFragment: (template, context) ->
     $("<div>").html template
 
-  bindFragment: ($template, context) ->
+  bindFragment: ($template, context, scope) ->
     $template.find('[data-bind]').each (index, el) =>
       $el = $ el
       bindings = decodeAttribute $el.attr 'data-bind'
@@ -388,7 +405,7 @@ _.extend liveTemplates,
       for binding in bindings
         helper = templateHelpers[binding.type]
         if helper
-          helper.call context, context, binding, $el
+          helper.call context, context, binding, $el, scope
         else
           throw new Error "No helper of type #{ binding.type } found"
 

@@ -1,7 +1,7 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getExpressionValue, getProperty, ifUnlessHelper, isExpression, isNode, liveTemplates, parseExpression, replaceTemplateBlocks, requireCompatible, reservedWords, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes, wrapExpressionGetters,
-    __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; },
-    __slice = [].slice;
+  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctionCache, getExpressionValue, getProperty, ifUnlessHelper, isExpression, isNode, liveTemplates, parseExpression, replaceTemplateBlocks, requireCompatible, reservedWords, stripBoundTag, templateCache, templateHelpers, templateReplacers, unescapeQuotes, wrapExpressionGetters, zip,
+    __slice = [].slice,
+    __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
   requireCompatible = typeof require === 'function';
 
@@ -16,7 +16,9 @@
     logCompiledTemplate: true
   };
 
-  expressionFunctions = {};
+  expressionFunctionCache = {};
+
+  templateCache = {};
 
   reservedWords = 'break case catch continue debugger default delete\
   do else finally for function if in instanceof new return switch this\
@@ -67,6 +69,32 @@
     return string;
   };
 
+  zip = function() {
+    var array, arrayLengths, arrays, index, item, res, _i, _j, _len, _len1, _ref;
+    arrays = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
+    res = [];
+    arrayLengths = (function() {
+      var _i, _len, _results;
+      _results = [];
+      for (_i = 0, _len = arrays.length; _i < _len; _i++) {
+        array = arrays[_i];
+        _results.push(array.length);
+      }
+      return _results;
+    })();
+    _ref = new Array(Math.max.apply(Math, arrayLengths));
+    for (index = _i = 0, _len = _ref.length; _i < _len; index = ++_i) {
+      item = _ref[index];
+      for (_j = 0, _len1 = arrays.length; _j < _len1; _j++) {
+        array = arrays[_j];
+        if ((item = array[index])) {
+          res.push(item);
+        }
+      }
+    }
+    return res;
+  };
+
   liveTemplates = function(context, config, options) {
     var $template, template, _base;
     if (config == null) {
@@ -85,8 +113,8 @@
     return this.$el.empty().append($template);
   };
 
-  wrapExpressionGetters = function(expression) {
-    var dependencies, index, item, newExpressionArray, newExpressionString, regex, splitReplace, stringSplit, strings, _i, _len, _ref,
+  wrapExpressionGetters = function(expression, scope) {
+    var dependencies, newExpressionString, regex, splitReplace, stringSplit, strings,
       _this = this;
     regex = /[$\w][$\w\d\.]*/gi;
     dependencies = [];
@@ -103,30 +131,19 @@
         return "getProperty( context, '" + keypath + "' )";
       });
     });
-    newExpressionArray = [];
-    _ref = new Array(Math.max(splitReplace.length, strings.length));
-    for (index = _i = 0, _len = _ref.length; _i < _len; index = ++_i) {
-      item = _ref[index];
-      if (splitReplace[index]) {
-        newExpressionArray.push(splitReplace[index]);
-      }
-      if (strings[index]) {
-        newExpressionArray.push(strings[index]);
-      }
-    }
-    newExpressionString = newExpressionArray.join(' ');
+    newExpressionString = zip(splitReplace, strings).join(' ');
     return [newExpressionString, dependencies];
   };
 
-  parseExpression = function(context, expression) {
+  parseExpression = function(context, expression, scope) {
     var dependencies, error, expressionIsNotSimpleGetter, fn, newExpressionString, _ref;
     if (isExpression(expression)) {
       expressionIsNotSimpleGetter = true;
     }
     if (expressionIsNotSimpleGetter) {
-      _ref = wrapExpressionGetters(expression), newExpressionString = _ref[0], dependencies = _ref[1];
-      if (expressionFunctions[newExpressionString]) {
-        fn = expressionFunctions[newExpressionString];
+      _ref = wrapExpressionGetters(expression, scope), newExpressionString = _ref[0], dependencies = _ref[1];
+      if (expressionFunctionCache[newExpressionString]) {
+        fn = expressionFunctionCache[newExpressionString];
       } else {
         try {
           fn = new Function('context', 'getProperty', "return (" + newExpressionString + ")");
@@ -135,7 +152,7 @@
           error.message = "\n" + "    LiveTemplate parse error:     \n" + ("        error: " + error.message + " \n") + ("        expression: " + expression);
           throw error;
         }
-        expressionFunctions[newExpressionString] = fn;
+        expressionFunctionCache[newExpressionString] = fn;
       }
     }
     return {
@@ -146,7 +163,7 @@
     };
   };
 
-  getExpressionValue = function(context, parsed, expression) {
+  getExpressionValue = function(context, parsed, expression, scope) {
     var error, res;
     if (parsed.isExpression) {
       try {
@@ -167,12 +184,12 @@
     }
   };
 
-  bindExpression = function(context, expression, callback) {
+  bindExpression = function(context, expression, scope, callback) {
     var changeCallback, dep, parsed, propertyName, singleton, singletonName, split, _i, _len, _ref;
-    parsed = parseExpression(context, expression);
+    parsed = parseExpression(context, expression, scope);
     changeCallback = function() {
       var value;
-      value = getExpressionValue(context, parsed, expression);
+      value = getExpressionValue(context, parsed, expression, scope);
       if (callback) {
         return callback(value);
       } else {
@@ -354,8 +371,8 @@
   };
 
   templateHelpers = {
-    each: function(context, binding, $el) {
-      var $placeholder, collection, expression, inSplit, inSyntax, insertItem, items, oldValue, propertyMap, removeItem, render, reset, stripped, template, value,
+    each: function(context, binding, $el, scope) {
+      var $placeholder, collection, currentValue, expression, inSplit, inSyntax, insertItem, items, oldValue, propertyMap, removeItem, render, reset, stripped, template, value,
         _this = this;
       template = $el.html();
       stripped = stripBoundTag($el);
@@ -369,11 +386,20 @@
       }
       collection = null;
       oldValue = null;
+      currentValue = null;
       items = [];
       window.items = items;
-      insertItem = function(model) {
+      insertItem = function(model, index) {
         var $item;
-        $item = liveTemplates.create(template, model);
+        scope = {
+          model: model,
+          mappings: {},
+          index: index
+        };
+        if (inSyntax) {
+          scope.mappings[propertyMap] = expression;
+        }
+        $item = liveTemplates.create(template, context, scope);
         items.push($item);
         return $item.insertBefore($placeholder);
       };
@@ -383,6 +409,7 @@
       };
       reset = function(value) {
         var item, _i, _len;
+        currentValue = value;
         for (_i = 0, _len = items.length; _i < _len; _i++) {
           item = items[_i];
           item.remove();
@@ -406,34 +433,34 @@
         }
         return oldValue = value;
       };
-      return bindExpression(context, expression, render);
+      return bindExpression(context, expression, scope, render);
     },
-    attribute: function(context, binding, $el) {
+    attribute: function(context, binding, $el, scope) {
       var _this = this;
-      return bindExpression(context, binding.expression, function(result) {
+      return bindExpression(context, binding.expression, scope, function(result) {
         return $el.attr(binding.attribute, result || '');
       });
     },
-    "if": function(context, binding, $el) {
+    "if": function(context, binding, $el, scope) {
       return ifUnlessHelper.apply(null, arguments);
     },
-    unless: function(context, binding, $el) {
+    unless: function(context, binding, $el, scope) {
       return ifUnlessHelper.apply(null, __slice.call(arguments).concat([true]));
     },
-    text: function(context, binding, $el) {
+    text: function(context, binding, $el, scope) {
       var stripped, textNode,
         _this = this;
       stripped = stripBoundTag($el);
       stripped.$contents.remove();
       textNode = stripped.$placeholder[0];
-      return bindExpression(context, binding.expression, function(result) {
+      return bindExpression(context, binding.expression, scope, function(result) {
         return textNode.textContent = result || '';
       });
     },
-    outlet: function(context, binding, $el) {
+    outlet: function(context, binding, $el, scope) {
       var parsed, value, _base;
-      parsed = parseExpression(context, binding.expression);
-      value = getExpressionValue(context, parsed, binding.expression);
+      parsed = parseExpression(context, binding.expression, scope);
+      value = getExpressionValue(context, parsed, binding.expression, scope);
       if ((_base = this.$)[value] == null) {
         _base[value] = $();
       }
@@ -442,37 +469,41 @@
   };
 
   _.extend(liveTemplates, {
-    create: function(template, context) {
+    create: function(template, context, scope) {
       var bound, compiled, fragment;
       compiled = this.compileTemplate(template, context);
       fragment = this.createFragment(compiled, context);
-      bound = this.bindFragment(fragment, context);
+      bound = this.bindFragment(fragment, context, scope);
       return bound;
     },
     compileTemplate: function(template, context) {
-      var index, replacer, _i, _len,
+      var cached, index, newTemplate, replacer, _i, _len,
         _this = this;
       if (template == null) {
         template = '';
       }
-      template = replaceTemplateBlocks(context, template);
+      if ((cached = templateCache[template])) {
+        return cached;
+      }
+      newTemplate = replaceTemplateBlocks(context, template);
       for (index = _i = 0, _len = templateReplacers.length; _i < _len; index = ++_i) {
         replacer = templateReplacers[index];
-        template = template.replace(replacer.regex, function() {
+        newTemplate = newTemplate.replace(replacer.regex, function() {
           var args;
           args = 1 <= arguments.length ? __slice.call(arguments, 0) : [];
           return replacer.replace.apply(replacer, [context].concat(__slice.call(args)));
         });
       }
       if (config.logCompiledTemplate) {
-        console.info('[INFO] Compiled template:\n', template);
+        console.info('[INFO] Compiled template:\n', newTemplate);
       }
-      return template;
+      templateCache[template] = newTemplate;
+      return newTemplate;
     },
     createFragment: function(template, context) {
       return $("<div>").html(template);
     },
-    bindFragment: function($template, context) {
+    bindFragment: function($template, context, scope) {
       var _this = this;
       $template.find('[data-bind]').each(function(index, el) {
         var $el, binding, bindings, helper, _i, _len;
@@ -482,7 +513,7 @@
           binding = bindings[_i];
           helper = templateHelpers[binding.type];
           if (helper) {
-            helper.call(context, context, binding, $el);
+            helper.call(context, context, binding, $el, scope);
           } else {
             throw new Error("No helper of type " + binding.type + " found");
           }
