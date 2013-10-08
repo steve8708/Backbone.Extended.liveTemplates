@@ -1,4 +1,4 @@
-# Backbone.Extended.LiveTemplates
+# Backbone.Extended.liveTemplates
 
 Ultra lightweight and high performance self updating templates for Backbone! Hot dayamn
 
@@ -22,7 +22,9 @@ Inspired by [handlebars](http://handlebarsjs.com/), [angularjs](http://angularjs
         {{#each onlineFriend in filterOnline( user.friends ) }}
           <div class="online-friend">
             <img src="{{onlineFriend.profileImage}}" class="online-riend">
-            <span class="online-friend-name">{{onlineFriend.name || 'anonymous'}}</span>
+            <span class="online-friend-name">
+              {{ onlineFriend.name || 'anonymous' }}
+            </span>
           </div>
         {{/each}}
       {{/if}}
