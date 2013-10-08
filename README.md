@@ -19,7 +19,12 @@ Inspired by [handlebars](http://handlebarsjs.com/), [angularjs](http://angularjs
       {{#if user.isLoggedIn() }}
         <div class="info"> Thanks for logging in!</div>
 
-        {{#each mappedPerson in mapPeople( people ) }}
+        {{#each onlineFriend in filterOnline( user.friends ) }}
+          <div class="online-friend">
+            <img src="{{onlineFriend.profileImage" class="online-riend">
+            <span class="online-friend-name">{{onlineFriend.name || 'anonymous'}}</span>
+          </div>
+        {{/each}}
       {{/if}}
 
       {{#if user.type == 'brand' && user.subscriptionLevel == 'premium'}}
