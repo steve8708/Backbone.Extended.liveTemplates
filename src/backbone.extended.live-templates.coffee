@@ -102,18 +102,19 @@ parseExpression = (context, expression) ->
   dependencies: dependencies
   isExpression: expressionIsNotSimpleGetter
 
-bindExpression = (context, binding, callback) ->
-  parsed = parseExpression context, binding.expression
+getExpressionValue = (context, parsed, expression) ->
+  if parsed.isExpression
+    res = parsed.fn context, getProperty, expression, config
+    if typeof res is 'string' then deserialize res else res
+  else
+    context.get expression.trim()
+
+bindExpression = (context, expression, callback) ->
+  parsed = parseExpression context, expression
 
   changeCallback = ->
-    if parsed.isExpression
-      res = parsed.fn context, getProperty, binding.expression, config
-      res = deserialize res if typeof res is 'string'
-      console.log 'expressionres', res, parsed.fn if res
-      if callback then callback res else res
-    else
-      res = context.get binding.expression.trim()
-      if callback then callback res else res
+    value = getExpressionValue context, parsed, expression
+    if callback then callback value else value
 
   if parsed.dependencies
     for dep in parsed.dependencies
@@ -256,7 +257,7 @@ ifUnlessHelper = (context, binding, $el, inverse) ->
   $placeholder = stripped.$placeholder
 
   isInserted = true
-  bindExpression context, binding, (result) =>
+  bindExpression context, binding.expression, (result) =>
     result = not result if inverse
 
     if result and not isInserted
@@ -279,9 +280,9 @@ templateHelpers =
     $placeholder = stripped.$placeholder
     inSplit      = binding.expression.split ' in '
     inSyntax     = binding.expression.split(' ')[1] is 'in'
-    keyName      = if inSyntax then inSplit[1] else binding.expression
-    value        = getProperty context, keyName
-    propertyMap  = split[0] if inSyntax
+    expression   = if inSyntax then inSplit[1] else binding.expression
+    value        = getProperty context, expression
+    propertyMap  = inSplit[0] if inSyntax
     collection   = null
     oldValue     = null
 
@@ -314,10 +315,10 @@ templateHelpers =
 
       oldValue = value
 
-    bindExpression context, binding, render
+    bindExpression context, expression, render
 
   attribute: (context, binding, $el) ->
-    bindExpression context, binding, (result) =>
+    bindExpression context, binding.expression, (result) =>
       $el.attr binding.attribute, result or ''
 
   if: (context, binding, $el) ->
@@ -327,10 +328,17 @@ templateHelpers =
     ifUnlessHelper arguments..., true
 
   text: (context, binding, $el) ->
-    bindExpression context, binding, (result) =>
+    bindExpression context, binding.expression, (result) =>
       $el.text result or ''
 
   outlet: (context, binding, $el) ->
+    parsed = parseExpression context, binding.expression
+    value = getExpressionValue context, parsed, binding.expression
+    @$[value] ?= $()
+    @$[value].add $el
+
+
+# Public methods - - - - - - - - - - - - - - - - - - - - - -
 
 _.extend liveTemplates,
   create: (template, context) ->

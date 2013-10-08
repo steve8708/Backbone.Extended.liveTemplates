@@ -21,7 +21,7 @@ Inspired by [handlebars](http://handlebarsjs.com/), [angularjs](http://angularjs
 
         {{#each onlineFriend in filterOnline( user.friends ) }}
           <div class="online-friend">
-            <img src="{{onlineFriend.profileImage}}" class="online-riend">
+            <img src="{{ onlineFriend.profileImage }}" class="online-riend">
             <span class="online-friend-name">
               {{ onlineFriend.name || 'anonymous' }}
             </span>

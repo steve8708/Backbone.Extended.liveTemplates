@@ -1,5 +1,5 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, reservedWords, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes, wrapExpressionGetters,
+  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getExpressionValue, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, reservedWords, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes, wrapExpressionGetters,
     __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; },
     __slice = [].slice;
 
@@ -136,31 +136,30 @@
     };
   };
 
-  bindExpression = function(context, binding, callback) {
-    var changeCallback, dep, parsed, propertyName, singleton, singletonName, split, _i, _len, _ref;
-    parsed = parseExpression(context, binding.expression);
-    changeCallback = function() {
-      var res;
-      if (parsed.isExpression) {
-        res = parsed.fn(context, getProperty, binding.expression, config);
-        if (typeof res === 'string') {
-          res = deserialize(res);
-        }
-        if (res) {
-          console.log('expressionres', res, parsed.fn);
-        }
-        if (callback) {
-          return callback(res);
-        } else {
-          return res;
-        }
+  getExpressionValue = function(context, parsed, expression) {
+    var res;
+    if (parsed.isExpression) {
+      res = parsed.fn(context, getProperty, expression, config);
+      if (typeof res === 'string') {
+        return deserialize(res);
       } else {
-        res = context.get(binding.expression.trim());
-        if (callback) {
-          return callback(res);
-        } else {
-          return res;
-        }
+        return res;
+      }
+    } else {
+      return context.get(expression.trim());
+    }
+  };
+
+  bindExpression = function(context, expression, callback) {
+    var changeCallback, dep, parsed, propertyName, singleton, singletonName, split, _i, _len, _ref;
+    parsed = parseExpression(context, expression);
+    changeCallback = function() {
+      var value;
+      value = getExpressionValue(context, parsed, expression);
+      if (callback) {
+        return callback(value);
+      } else {
+        return value;
       }
     };
     if (parsed.dependencies) {
@@ -319,7 +318,7 @@
     $contents = stripped.$contents;
     $placeholder = stripped.$placeholder;
     isInserted = true;
-    return bindExpression(context, binding, function(result) {
+    return bindExpression(context, binding.expression, function(result) {
       var hiddenDOM;
       if (inverse) {
         result = !result;
@@ -339,17 +338,17 @@
 
   templateHelpers = {
     each: function(context, binding, $el) {
-      var $placeholder, collection, inSplit, inSyntax, insertItem, items, keyName, oldValue, propertyMap, removeItem, render, reset, stripped, template, value,
+      var $placeholder, collection, expression, inSplit, inSyntax, insertItem, items, oldValue, propertyMap, removeItem, render, reset, stripped, template, value,
         _this = this;
       template = $el.html();
       stripped = stripBoundTag($el);
       $placeholder = stripped.$placeholder;
       inSplit = binding.expression.split(' in ');
       inSyntax = binding.expression.split(' ')[1] === 'in';
-      keyName = inSyntax ? inSplit[1] : binding.expression;
-      value = getProperty(context, keyName);
+      expression = inSyntax ? inSplit[1] : binding.expression;
+      value = getProperty(context, expression);
       if (inSyntax) {
-        propertyMap = split[0];
+        propertyMap = inSplit[0];
       }
       collection = null;
       oldValue = null;
@@ -390,11 +389,11 @@
         }
         return oldValue = value;
       };
-      return bindExpression(context, binding, render);
+      return bindExpression(context, expression, render);
     },
     attribute: function(context, binding, $el) {
       var _this = this;
-      return bindExpression(context, binding, function(result) {
+      return bindExpression(context, binding.expression, function(result) {
         return $el.attr(binding.attribute, result || '');
       });
     },
@@ -406,11 +405,19 @@
     },
     text: function(context, binding, $el) {
       var _this = this;
-      return bindExpression(context, binding, function(result) {
+      return bindExpression(context, binding.expression, function(result) {
         return $el.text(result || '');
       });
     },
-    outlet: function(context, binding, $el) {}
+    outlet: function(context, binding, $el) {
+      var parsed, value, _base;
+      parsed = parseExpression(context, binding.expression);
+      value = getExpressionValue(context, parsed, binding.expression);
+      if ((_base = this.$)[value] == null) {
+        _base[value] = $();
+      }
+      return this.$[value].add($el);
+    }
   };
 
   _.extend(liveTemplates, {
