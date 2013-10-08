@@ -23,9 +23,8 @@ module.exports = (grunt) ->
     connect:
       server:
         options:
-          port: 5030
+          port: 5050
           hostname: hostname
-          base: 'test'
 
     coffee:
       compile:

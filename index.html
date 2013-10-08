@@ -1,19 +1,26 @@
 <!DOCTYPE html>
 <html>
   <head>
+  </head>
+  </body>
     <script src="test/vendor/jquery.js"></script>
-    <script src="test/vendor/underscore.js"></script>
+    <script src="test/vendor/lodash.js"></script>
     <script src="test/vendor/backbone.js"></script>
     <script>
       Backbone.extensions = { view: {} };
     </script>
     <script src="backbone.extended.live-templates.js"></script>
     <script>
-      var view = new Backbone.View();
-      view.template = '<div>HI!</div>';
+      window.View = Backbone.View.extend({
+        el: document.body,
+        template: '<div class="{{hi}}">HI! {{yo}} {{#if foo}} bar {{/if}}</div>'
+      });
+      window.view = new View();
+      view.state = new Backbone.Model();
+      view.get = function () { return this.state.get.apply(this.state, arguments); };
+      view.set = function () { return this.state.set.apply(this.state, arguments); };
+      view.state.on('all', function () { view.trigger.apply(view, arguments); })
       Backbone.extensions.view.liveTemplates.call(view);
     </script>
-  </head>
-  </body>
   </body>
 </html>
