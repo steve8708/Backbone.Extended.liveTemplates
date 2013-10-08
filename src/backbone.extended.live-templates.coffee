@@ -8,8 +8,8 @@ Backbone = @Backbone or requireCompatible and require 'backbone'
 config =
   dontRemoveAttributes: false
   dontStripElements: false
-  logExpressionErrors: true
-  logCompiledTemplate: true
+  logExpressionErrors: false
+  logCompiledTemplate: false
 
 expressionFunctionCache = {}
 templateCache = {}
@@ -47,6 +47,11 @@ zip = (arrays...) ->
       res.push item if ( item = array[index] )
   res
 
+traceStaticObjectGetter = (keypath, base) ->
+  res = base
+  res = res[value] if res for value in keypath
+  res
+
 
 # LiveTemplates - - - - - - - - - - - - - - - - - - - - - -
 
@@ -75,7 +80,7 @@ wrapExpressionGetters = (expression, scope) ->
       return keypath if keypath in reservedWords or /'|"/.test keypath
       if keypath.indexOf('$window.') isnt 0 and keypath.indexOf('$view.') isnt 0
         dependencies.push keypath
-      "getProperty( context, '#{ keypath }' )"
+      "getProperty( context, '#{ keypath }', scope )"
 
   newExpressionString = zip(splitReplace, strings).join ' '
 
@@ -86,15 +91,15 @@ parseExpression = (context, expression, scope) ->
     expressionIsNotSimpleGetter = true
 
   if expressionIsNotSimpleGetter
-    [ newExpressionString, dependencies ] = \
+    [ newExpression, dependencies ] = \
       wrapExpressionGetters expression, scope
 
-    if expressionFunctionCache[newExpressionString]
-      fn = expressionFunctionCache[newExpressionString]
+    if expressionFunctionCache[newExpression]
+      fn = expressionFunctionCache[newExpression]
     else
       try
-        fn = new Function 'context', 'getProperty',
-          "return (#{newExpressionString})"
+        fn = new Function 'context', 'getProperty', 'scope',
+          "return ( #{ newExpression } )"
       catch error
         error.message =                     "\n" +
           "    LiveTemplate parse error:     \n" +
@@ -102,7 +107,7 @@ parseExpression = (context, expression, scope) ->
           "        expression: #{ expression }"
         throw error
 
-      expressionFunctionCache[newExpressionString] = fn
+      expressionFunctionCache[newExpression] = fn
 
   string: expression
   fn: fn
@@ -153,29 +158,16 @@ stripBoundTag = ($el) ->
   $contents: $contents
   $placeholder: $placeholder
 
-# Allow coffeescript! if compiling have separate flag to first
+# TODO:
+#    Allow coffeescript! if compiling have separate flag to first
 #    coffee compile
 #
-# Expressions:
-#    $window.Math.random( foo )
-#    foo.bar.baz()
-#    window.alert
-#    $app.foo
-#    $user.bar( foo, bar, baz.foo(), Math.random() )
-#    $view.foo( bar )
-#
-getProperty = (context, keypath, localOptions) ->
-  # TODO: parse localOptions for index, replacements
+getProperty = (context, keypath, scope) ->
+  dotSplit = keypath.split '.'
   if keypath.indexOf('$window.') is 0
-    res = window
-    for value in keypath.split('.').slice 1
-      res = res[value] if res
-    res
+    traceStaticObjectGetter dotSplit.slice(1), window
   else if keypath.indexOf('$view.') is 0
-    res = @
-    for value in keypath.split('.').slice 1
-      res = res[value] if res
-    res
+    traceStaticObjectGetter dotSplit.slice(1), context or @
   else if keypath[0] is '$'
     split = keypath.split '.'
     singleton = keypath[0]
@@ -418,6 +410,7 @@ _.extend liveTemplates,
 
 liveTemplates.helpers = templateHelpers
 liveTemplates.config = config
+liveTemplates.replacers = templateReplacers
 
 if Backbone and Backbone.extensions and Backbone.extensions.view
   Backbone.extensions.view.liveTemplates = liveTemplates

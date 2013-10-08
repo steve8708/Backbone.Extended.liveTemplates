@@ -1,5 +1,5 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctionCache, getExpressionValue, getProperty, ifUnlessHelper, isExpression, isNode, liveTemplates, parseExpression, replaceTemplateBlocks, requireCompatible, reservedWords, stripBoundTag, templateCache, templateHelpers, templateReplacers, unescapeQuotes, wrapExpressionGetters, zip,
+  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctionCache, getExpressionValue, getProperty, ifUnlessHelper, isExpression, isNode, liveTemplates, parseExpression, replaceTemplateBlocks, requireCompatible, reservedWords, stripBoundTag, templateCache, templateHelpers, templateReplacers, traceStaticObjectGetter, unescapeQuotes, wrapExpressionGetters, zip,
     __slice = [].slice,
     __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
@@ -12,8 +12,8 @@
   config = {
     dontRemoveAttributes: false,
     dontStripElements: false,
-    logExpressionErrors: true,
-    logCompiledTemplate: true
+    logExpressionErrors: false,
+    logCompiledTemplate: false
   };
 
   expressionFunctionCache = {};
@@ -95,6 +95,23 @@
     return res;
   };
 
+  traceStaticObjectGetter = function(keypath, base) {
+    var res, value;
+    res = base;
+    if ((function() {
+      var _i, _len, _results;
+      _results = [];
+      for (_i = 0, _len = keypath.length; _i < _len; _i++) {
+        value = keypath[_i];
+        _results.push(res);
+      }
+      return _results;
+    })()) {
+      res = res[value];
+    }
+    return res;
+  };
+
   liveTemplates = function(context, config, options) {
     var $template, template, _base;
     if (config == null) {
@@ -128,7 +145,7 @@
         if (keypath.indexOf('$window.') !== 0 && keypath.indexOf('$view.') !== 0) {
           dependencies.push(keypath);
         }
-        return "getProperty( context, '" + keypath + "' )";
+        return "getProperty( context, '" + keypath + "', scope )";
       });
     });
     newExpressionString = zip(splitReplace, strings).join(' ');
@@ -136,23 +153,23 @@
   };
 
   parseExpression = function(context, expression, scope) {
-    var dependencies, error, expressionIsNotSimpleGetter, fn, newExpressionString, _ref;
+    var dependencies, error, expressionIsNotSimpleGetter, fn, newExpression, _ref;
     if (isExpression(expression)) {
       expressionIsNotSimpleGetter = true;
     }
     if (expressionIsNotSimpleGetter) {
-      _ref = wrapExpressionGetters(expression, scope), newExpressionString = _ref[0], dependencies = _ref[1];
-      if (expressionFunctionCache[newExpressionString]) {
-        fn = expressionFunctionCache[newExpressionString];
+      _ref = wrapExpressionGetters(expression, scope), newExpression = _ref[0], dependencies = _ref[1];
+      if (expressionFunctionCache[newExpression]) {
+        fn = expressionFunctionCache[newExpression];
       } else {
         try {
-          fn = new Function('context', 'getProperty', "return (" + newExpressionString + ")");
+          fn = new Function('context', 'getProperty', 'scope', "return ( " + newExpression + " )");
         } catch (_error) {
           error = _error;
           error.message = "\n" + "    LiveTemplate parse error:     \n" + ("        error: " + error.message + " \n") + ("        expression: " + expression);
           throw error;
         }
-        expressionFunctionCache[newExpressionString] = fn;
+        expressionFunctionCache[newExpression] = fn;
       }
     }
     return {
@@ -228,28 +245,13 @@
     };
   };
 
-  getProperty = function(context, keypath, localOptions) {
-    var res, singleton, split, value, _i, _j, _len, _len1, _ref, _ref1;
+  getProperty = function(context, keypath, scope) {
+    var dotSplit, singleton, split;
+    dotSplit = keypath.split('.');
     if (keypath.indexOf('$window.') === 0) {
-      res = window;
-      _ref = keypath.split('.').slice(1);
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        value = _ref[_i];
-        if (res) {
-          res = res[value];
-        }
-      }
-      return res;
+      return traceStaticObjectGetter(dotSplit.slice(1), window);
     } else if (keypath.indexOf('$view.') === 0) {
-      res = this;
-      _ref1 = keypath.split('.').slice(1);
-      for (_j = 0, _len1 = _ref1.length; _j < _len1; _j++) {
-        value = _ref1[_j];
-        if (res) {
-          res = res[value];
-        }
-      }
-      return res;
+      return traceStaticObjectGetter(dotSplit.slice(1), context || this);
     } else if (keypath[0] === '$') {
       split = keypath.split('.');
       singleton = keypath[0];
@@ -529,6 +531,8 @@
   liveTemplates.helpers = templateHelpers;
 
   liveTemplates.config = config;
+
+  liveTemplates.replacers = templateReplacers;
 
   if (Backbone && Backbone.extensions && Backbone.extensions.view) {
     Backbone.extensions.view.liveTemplates = liveTemplates;
