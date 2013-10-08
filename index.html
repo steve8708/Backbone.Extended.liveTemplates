@@ -26,18 +26,25 @@
     <script src="test/vendor/jquery.js"></script>
     <script src="test/vendor/lodash.js"></script>
     <script src="test/vendor/backbone.js"></script>
+    <script src="test/vendor/backbone-associations.js"></script>
     <script>
       Backbone.extensions = { view: {} };
     </script>
     <script src="backbone.extended.live-templates.js"></script>
     <script>
       window.view = new Backbone.View({ el: document.getElementById('main') });
-      view.state = new Backbone.Model({
+      var State = Backbone.AssociatedModel.extend({
+        relations: [{
+          type: Backbone.Many,
+          key: 'testCollection',
+          collectionType: Backbone.Collection,
+          relatedModel: Backbone.Model
+        }]
+      });
+      view.state = new State({
         test: 'success!',
         testArray: [ 1, 2, 3 ],
-        testCollection: new Backbone.Collection([
-          { name: 'one' }, { name: 'two' }
-        ])
+        testCollection: [{ name: 'one' }, { name: 'two' }]
       });
       view.get = function () { return this.state.get.apply(this.state, arguments); };
       view.set = function () { this.state.set.apply(this.state, arguments); return this; };

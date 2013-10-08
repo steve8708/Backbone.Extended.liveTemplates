@@ -1,5 +1,5 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctionCache, getExpressionValue, getProperty, ifUnlessHelper, isExpression, isNode, liveTemplates, parseExpression, replaceTemplateBlocks, requireCompatible, reservedWords, stripBoundTag, templateCache, templateHelpers, templateReplacers, traceStaticObjectGetter, unescapeQuotes, wrapExpressionGetters, zip,
+  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctionCache, getExpressionValue, getProperty, ifUnlessHelper, isExpression, isNode, liveTemplates, mapKeypath, parseExpression, replaceTemplateBlocks, requireCompatible, reservedWords, stripBoundTag, templateCache, templateHelpers, templateReplacers, traceStaticObjectGetter, unescapeQuotes, wrapExpressionGetters, zip,
     __slice = [].slice,
     __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
@@ -12,8 +12,8 @@
   config = {
     dontRemoveAttributes: false,
     dontStripElements: false,
-    logExpressionErrors: false,
-    logCompiledTemplate: false
+    logExpressionErrors: true,
+    logCompiledTemplate: true
   };
 
   expressionFunctionCache = {};
@@ -50,23 +50,21 @@
 
   deserialize = function(string) {
     var num;
-    string = string.trim();
-    if (string === 'null') {
+    if (typeof string !== 'string') {
+      return string;
+    } else if (string === 'null') {
       return null;
-    }
-    if (string === 'undefined') {
+    } else if (string === 'undefined') {
       return void 0;
-    }
-    if (string === 'true') {
+    } else if (string === 'true') {
       return true;
-    }
-    if (string === 'false') {
+    } else if (string === 'false') {
       return false;
-    }
-    if (!isNaN((num = Number(string)))) {
+    } else if (!isNaN((num = Number(string)))) {
       return num;
+    } else {
+      return string;
     }
-    return string;
   };
 
   zip = function() {
@@ -96,13 +94,17 @@
   };
 
   traceStaticObjectGetter = function(keypath, base) {
-    var res, value;
+    var res, split, value;
+    if (base == null) {
+      base = {};
+    }
+    split = _.compact(keypath.split(/[\[\]\.]/));
     res = base;
     if ((function() {
       var _i, _len, _results;
       _results = [];
-      for (_i = 0, _len = keypath.length; _i < _len; _i++) {
-        value = keypath[_i];
+      for (_i = 0, _len = split.length; _i < _len; _i++) {
+        value = split[_i];
         _results.push(res);
       }
       return _results;
@@ -143,7 +145,7 @@
           return keypath;
         }
         if (keypath.indexOf('$window.') !== 0 && keypath.indexOf('$view.') !== 0) {
-          dependencies.push(keypath);
+          dependencies.push(mapKeypath(keypath, scope));
         }
         return "getProperty( context, '" + keypath + "', scope )";
       });
@@ -184,7 +186,7 @@
     var error, res;
     if (parsed.isExpression) {
       try {
-        res = parsed.fn(context, getProperty, expression, config);
+        res = parsed.fn(context, getProperty, scope);
       } catch (_error) {
         error = _error;
         if (config.logExpressionErrors) {
@@ -202,7 +204,7 @@
   };
 
   bindExpression = function(context, expression, scope, callback) {
-    var changeCallback, dep, parsed, propertyName, singleton, singletonName, split, _i, _len, _ref;
+    var baseProperty, changeCallback, dep, depBase, parsed, propertyName, singleton, singletonName, split, _i, _len, _ref;
     parsed = parseExpression(context, expression, scope);
     changeCallback = function() {
       var value;
@@ -222,9 +224,13 @@
           singletonName = split.substring(1);
           singleton = context.liveTemplate.singletons[singletonName];
           propertyName = split.slice(1).join('.');
-          context.listenTo(singleton, "change:" + propertyName);
+          context.listenTo(singleton, "change:" + propertyName, changeCallback);
+          baseProperty = propertyName.split(/[\[\]\.]/)[0];
+          context.listenTo(singleton, "change:" + baseProperty, changeCallback);
         } else if (dep.indexOf('$window.') !== 0 && dep.indexOf('$view.') !== 0) {
           context.on("change:" + dep, changeCallback);
+          depBase = dep.split(/[\[\]\.]/)[0];
+          context.on("change:" + depBase, changeCallback);
         }
       }
     }
@@ -245,13 +251,40 @@
     };
   };
 
-  getProperty = function(context, keypath, scope) {
-    var dotSplit, singleton, split;
+  mapKeypath = function(keypath, scope) {
+    var dotSplit, map, trail;
+    if (scope == null) {
+      scope = {};
+    }
     dotSplit = keypath.split('.');
-    if (keypath.indexOf('$window.') === 0) {
-      return traceStaticObjectGetter(dotSplit.slice(1), window);
+    if (scope.mappings) {
+      if (dotSplit[0] in scope.mappings) {
+        map = scope.mappings[dotSplit[0]];
+        trail = dotSplit.slice(1).join('.');
+        if (trail) {
+          trail = '.' + trail;
+        }
+        keypath = "" + map + "[" + scope.index + "]" + trail;
+      }
+    }
+    return keypath;
+  };
+
+  getProperty = function(context, keypath, scope) {
+    var dotSplit, object, singleton, split;
+    if (scope == null) {
+      scope = {};
+    }
+    dotSplit = keypath.split('.');
+    keypath = mapKeypath(keypath, scope);
+    if (scope.isPlainObject) {
+      split = keypath.split(/[\.\[\]]/);
+      object = context.get(split[0]);
+      return traceStaticObjectGetter(keypath.substring(split[0].length), object);
+    } else if (keypath.indexOf('$window.') === 0) {
+      return traceStaticObjectGetter(dotSplit.slice(1).join('.'), window);
     } else if (keypath.indexOf('$view.') === 0) {
-      return traceStaticObjectGetter(dotSplit.slice(1), context || this);
+      return traceStaticObjectGetter(dotSplit.slice(1).join('.'), context || this);
     } else if (keypath[0] === '$') {
       split = keypath.split('.');
       singleton = keypath[0];
@@ -347,14 +380,14 @@
     return template;
   };
 
-  ifUnlessHelper = function(context, binding, $el, inverse) {
+  ifUnlessHelper = function(context, binding, $el, scope, inverse) {
     var $contents, $placeholder, isInserted, stripped,
       _this = this;
     stripped = stripBoundTag($el);
     $contents = stripped.$contents;
     $placeholder = stripped.$placeholder;
     isInserted = true;
-    return bindExpression(context, binding.expression, function(result) {
+    return bindExpression(context, binding.expression, scope, function(result) {
       var hiddenDOM;
       if (inverse) {
         result = !result;
@@ -374,7 +407,7 @@
 
   templateHelpers = {
     each: function(context, binding, $el, scope) {
-      var $placeholder, collection, currentValue, expression, inSplit, inSyntax, insertItem, items, oldValue, propertyMap, removeItem, render, reset, stripped, template, value,
+      var $placeholder, collection, currentValue, expression, inSplit, inSyntax, insertItem, items, oldValue, propertyMap, removeItem, render, reset, stripped, template, update, value,
         _this = this;
       template = $el.html();
       stripped = stripBoundTag($el);
@@ -390,13 +423,15 @@
       oldValue = null;
       currentValue = null;
       items = [];
-      window.items = items;
-      insertItem = function(model, index) {
-        var $item;
+      insertItem = function(item, index) {
+        var $item, itemIsModel;
+        itemIsModel = item instanceof Backbone.Model;
         scope = {
-          model: model,
+          item: item,
           mappings: {},
-          index: index
+          index: index,
+          isModel: itemIsModel,
+          isPlainObject: !itemIsModel
         };
         if (inSyntax) {
           scope.mappings[propertyMap] = expression;
@@ -421,6 +456,9 @@
           return value.forEach(insertItem);
         }
       };
+      update = function() {
+        return currentValue.forEach(function(item) {});
+      };
       render = function(value) {
         reset(value);
         if (oldValue) {
@@ -432,6 +470,7 @@
           _this.listenTo(value, 'reset', function() {
             return reset(value);
           });
+          _this.listenTo(value, 'add remove reset', update);
         }
         return oldValue = value;
       };

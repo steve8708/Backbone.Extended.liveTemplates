@@ -8,8 +8,8 @@ Backbone = @Backbone or requireCompatible and require 'backbone'
 config =
   dontRemoveAttributes: false
   dontStripElements: false
-  logExpressionErrors: false
-  logCompiledTemplate: false
+  logExpressionErrors: true
+  logCompiledTemplate: true
 
 expressionFunctionCache = {}
 templateCache = {}
@@ -31,13 +31,13 @@ escapeForRegex = (str) ->
   str.replace /[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, '\\$&'
 
 deserialize = (string) ->
-  string = string.trim()
-  if string is 'null'                then return null
-  if string is 'undefined'           then return undefined
-  if string is 'true'                then return true
-  if string is 'false'               then return false
-  if not isNaN (num = Number string) then return num
-  string
+  if typeof   string isnt 'string'         then string
+  else if     string is 'null'             then null
+  else if     string is 'undefined'        then undefined
+  else if     string is 'true'             then true
+  else if     string is 'false'            then false
+  else if not isNaN (num = Number string)  then num
+  else string
 
 zip = (arrays...) ->
   res = []
@@ -47,9 +47,11 @@ zip = (arrays...) ->
       res.push item if ( item = array[index] )
   res
 
-traceStaticObjectGetter = (keypath, base) ->
+# FIXME: doesn't work for foo['bar']
+traceStaticObjectGetter = (keypath, base = {}) ->
+  split = _.compact keypath.split /[\[\]\.]/
   res = base
-  res = res[value] if res for value in keypath
+  res = res[value] if res for value in split
   res
 
 
@@ -79,7 +81,7 @@ wrapExpressionGetters = (expression, scope) ->
     string.replace regex, (keypath) ->
       return keypath if keypath in reservedWords or /'|"/.test keypath
       if keypath.indexOf('$window.') isnt 0 and keypath.indexOf('$view.') isnt 0
-        dependencies.push keypath
+        dependencies.push mapKeypath keypath, scope
       "getProperty( context, '#{ keypath }', scope )"
 
   newExpressionString = zip(splitReplace, strings).join ' '
@@ -117,7 +119,7 @@ parseExpression = (context, expression, scope) ->
 getExpressionValue = (context, parsed, expression, scope) ->
   if parsed.isExpression
     try
-      res = parsed.fn context, getProperty, expression, config
+      res = parsed.fn context, getProperty, scope
     catch error
       if config.logExpressionErrors
         console.info (
@@ -137,6 +139,8 @@ bindExpression = (context, expression, scope, callback) ->
     value = getExpressionValue context, parsed, expression, scope
     if callback then callback value else value
 
+  # MAJOR FIXME: this only supports one level deep
+  #   e.g. foo[0], not foo.bar[0]
   if parsed.dependencies
     for dep in parsed.dependencies
       if dep[0] is '$'
@@ -144,9 +148,14 @@ bindExpression = (context, expression, scope, callback) ->
         singletonName = split.substring 1
         singleton = context.liveTemplate.singletons[singletonName]
         propertyName = split.slice(1).join '.'
-        context.listenTo singleton, "change:#{ propertyName }"
+
+        context.listenTo singleton, "change:#{ propertyName }", changeCallback
+        baseProperty = propertyName.split(/[\[\]\.]/)[0]
+        context.listenTo singleton, "change:#{ baseProperty }", changeCallback
       else if dep.indexOf('$window.') isnt 0 and dep.indexOf('$view.') isnt 0
         context.on "change:#{ dep }", changeCallback
+        depBase = dep.split(/[\[\]\.]/)[0]
+        context.on "change:#{ depBase }", changeCallback
 
   changeCallback()
 
@@ -158,19 +167,36 @@ stripBoundTag = ($el) ->
   $contents: $contents
   $placeholder: $placeholder
 
+mapKeypath = (keypath, scope = {}) ->
+  dotSplit = keypath.split '.'
+  if scope.mappings
+    if dotSplit[0] of scope.mappings
+      map = scope.mappings[dotSplit[0]]
+      trail = dotSplit.slice(1).join '.'
+      trail = '.' + trail if trail
+      keypath = "#{ map }[#{ scope.index }]#{ trail }"
+  keypath
+
 # TODO:
 #    Allow coffeescript! if compiling have separate flag to first
 #    coffee compile
 #
-getProperty = (context, keypath, scope) ->
+getProperty = (context, keypath, scope = {}) ->
   dotSplit = keypath.split '.'
-  if keypath.indexOf('$window.') is 0
-    traceStaticObjectGetter dotSplit.slice(1), window
+  keypath = mapKeypath keypath, scope
+
+  if scope.isPlainObject
+    split = keypath.split /[\.\[\]]/
+    object = context.get split[0]
+    traceStaticObjectGetter keypath.substring(split[0].length), object
+  else if keypath.indexOf('$window.') is 0
+    traceStaticObjectGetter dotSplit.slice(1).join('.'), window
   else if keypath.indexOf('$view.') is 0
-    traceStaticObjectGetter dotSplit.slice(1), context or @
+    traceStaticObjectGetter dotSplit.slice(1).join('.'), context or @
   else if keypath[0] is '$'
     split = keypath.split '.'
     singleton = keypath[0]
+
     try
       context.liveTemplate.singletons[singleton].get split.slice(1).join '.'
   else
@@ -265,13 +291,13 @@ replaceTemplateBlocks = (context, template) ->
 
 # Template helpers - - - - - - - - - - - - - - - - - - - - -
 
-ifUnlessHelper = (context, binding, $el, inverse) ->
+ifUnlessHelper = (context, binding, $el, scope, inverse) ->
   stripped = stripBoundTag $el
   $contents = stripped.$contents
   $placeholder = stripped.$placeholder
 
   isInserted = true
-  bindExpression context, binding.expression, (result) =>
+  bindExpression context, binding.expression, scope, (result) =>
     result = not result if inverse
 
     if result and not isInserted
@@ -284,6 +310,9 @@ ifUnlessHelper = (context, binding, $el, inverse) ->
       $contents.remove()
       isInserted = false
 
+# TODO:
+#  {{view { view: 'foobar' } }}
+#  {{viewCollection { view: 'foobar', collection: 'wasup' } }}
 templateHelpers =
   # TODO:
   #     {{$index}}
@@ -301,18 +330,21 @@ templateHelpers =
     currentValue = null
 
     items = []
-    window.items = items
 
-    insertItem = (model, index) =>
-      # MAJOR FIXME: this won't accept
+    insertItem = (item, index) =>
+      itemIsModel = item instanceof Backbone.Model
+      # FIXME: handle multiple mappings deep
       scope =
-        model: model
+        item: item
         mappings: {}
         index: index
+        isModel: itemIsModel
+        isPlainObject: not itemIsModel
 
       scope.mappings[propertyMap] = expression if inSyntax
 
       $item = liveTemplates.create template, context, scope
+      # FIXME: insert at index?
       items.push $item
       $item.insertBefore $placeholder
 
@@ -326,6 +358,10 @@ templateHelpers =
       items = []
       value.forEach insertItem if value and value.forEach
 
+    update = =>
+      currentValue.forEach (item) =>
+        # MAJOR TODO: update index
+
     render = (value) =>
       reset value
       @stopListening oldValue if oldValue
@@ -334,6 +370,7 @@ templateHelpers =
         @listenTo value, 'add', insertItem
         @listenTo value, 'remove', removeItem
         @listenTo value, 'reset', => reset value
+        @listenTo value, 'add remove reset', update
 
       oldValue = value
 
