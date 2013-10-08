@@ -7,27 +7,31 @@ config =
   dontStripElements: false
   logExpressionErrors: true
 
-window.expressionFunctions = {}
+expressionFunctions = {}
+
+reservedWords = 'break case catch continue debugger default delete
+  do else finally for function if in instanceof new return switch this
+  throw try typeof var void while with true false null undefined'.split /\s+/
 
 
 # Utils - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-escapeQuotes    = (string) -> string.replace /'/g, "\\'"
-unescapeQuotes  = (string) -> string.replace /\\'/g, "'"
+escapeQuotes    = (string) -> string.replace /'/g, '&#39;'
+unescapeQuotes  = (string) -> string.replace /\&\#39\;/g, "'"
 encodeAttribute = (object) -> escapeQuotes JSON.stringify object
 decodeAttribute = (string) -> JSON.parse unescapeQuotes string or ''
-isExpression = (string) -> not /^[$a-z_\.]+$/.test string.trim()
+isExpression    = (string) -> not /^[$\w_\.]+$/.test string.trim()
 
 escapeForRegex = (str) ->
   str.replace /[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, '\\$&'
 
 deserialize = (string) ->
   string = string.trim()
-  if string is 'null' then return null
-  if string is 'undefined' then return undefined
-  if string is 'true' then return true
-  if string is 'false' then return false
-  if not isNaN (num = Number value) then return num
+  if string is 'null'                then return null
+  if string is 'undefined'           then return undefined
+  if string is 'true'                then return true
+  if string is 'false'               then return false
+  if not isNaN (num = Number string) then return num
   string
 
 
@@ -37,7 +41,7 @@ liveTemplates = (context, config = {}, options) ->
   template = @template or config.template or @$el.html()
   @liveTemplate = hiddenDOM: [], singletons: config.singletons or {}
   @liveTemplate.singletons.view ?= @
-  $template = liveTemplates.init template, @
+  $template = liveTemplates.create template, @
   @liveTemplate.$template = $template
   @$el.empty().append $template
 
@@ -45,40 +49,54 @@ liveTemplates = (context, config = {}, options) ->
 # Helepers - - - - - - - - - - - - - - - - - - - - - - - - -
 
 parseExpression = (context, expression) ->
-  # FIXME: this breaks if string contains ' in ' or ' instanceof '
-  #   e.g. {{#if foo === 'hello in vegas' }}
-  regex = /[$a-z\.]+/gi
+  regex = /([$\w\.])+/gi
   dependencies = []
 
-  newExpressionString = expression.replace regex, (keypath) =>
-    if keypath.indexOf('$window.') isnt 0 and keypath.indexOf('$view.') isnt 0
-      dependencies.push keypath
-    "getProperty( context, '#{ keypath }' )"
+  stringSplit = expression.split /'[\s\S]*?'/
+  strings = ( expression.match /'[\s\S]*?'/g ) or []
+  expression = expression.replace /'[\S\s]+?'/, (match) ->
+    match.replace /(\s)/g, '\\$1'
+
+  splitReplace = stringSplit.map (string) =>
+    string.replace regex, (keypath) =>
+      return keypath if keypath in reservedWords or /'|"/.test keypath
+
+      if keypath.indexOf('$window.') isnt 0 and keypath.indexOf('$view.') isnt 0
+        dependencies.push keypath
+      "getProperty( context, '#{ keypath }' )"
+
+  newExpressionArray = []
+  for item, index in new Array Math.max splitReplace.length, strings.length
+    newExpressionArray.push splitReplace[index] if splitReplace[index]
+    newExpressionArray.push strings[index] if strings[index]
+  newExpressionString = newExpressionArray.join ' '
 
   if isExpression expression
-    expressionIsExpression = true
+    expressionIsNotSimpleGetter = true
 
-  console.log 'expressionIsExpression', expressionIsExpression, expression
-
-  if expressionIsExpression
+  if expressionIsNotSimpleGetter
     if expressionFunctions[newExpressionString]
       fn = expressionFunctions[newExpressionString]
     else
+      console.log 'newExpressionString', newExpressionString
       fn = new Function 'context', 'getProperty', 'expression', 'config',
         "try {
-          return #{ newExpressionString }
-        } catch (error) {
-          if (config.logExpressionErrors)
-            console.info('[INFO] Template error caught: \\n' +
-              '       Expression:' + expression + '\\n' +
-              '       Message:' + error.message)
+          return ( #{ newExpressionString } )
+        }
+        catch (error) {
+          if ( config.logExpressionErrors )
+            console.info(
+              '[INFO] Template error caught: '       + '\\n' +
+              '       Expression: ' + expression     + '\\n' +
+              '       Message: '    + error.message
+            );
         }"
       expressionFunctions[newExpressionString] = fn
 
   string: expression
   fn: fn
   dependencies: dependencies
-  isExpression: expressionIsExpression
+  isExpression: expressionIsNotSimpleGetter
 
 bindExpression = (context, binding, callback) ->
   parsed = parseExpression context, binding.expression
@@ -87,6 +105,7 @@ bindExpression = (context, binding, callback) ->
     if parsed.isExpression
       res = parsed.fn context, getProperty, binding.expression, config
       res = deserialize res if typeof res is 'string'
+      console.log 'expressionres', res, parsed.fn if res
       if callback then callback res else res
     else
       res = context.get binding.expression.trim()
@@ -117,14 +136,15 @@ stripBoundTag = ($el) ->
 #    coffee compile
 #
 # Expressions:
-#    Math.random( foo )
+#    $window.Math.random( foo )
 #    foo.bar.baz()
 #    window.alert
 #    $app.foo
 #    $user.bar( foo, bar, baz.foo(), Math.random() )
 #    $view.foo( bar )
 #
-getProperty = (context, keypath) ->
+getProperty = (context, keypath, localOptions) ->
+  # TODO: parse localOptions for index, replacements
   if keypath.indexOf('$window.') is 0
     res = window
     for value in keypath.split('.').slice 1
@@ -168,16 +188,16 @@ templateReplacers = [
   regex: /<!--[\s\S]*?-->/g
   replace: (match) -> '' # TODO: config to preserve comments
 ,
-  regex: /<([a-z\-_]+?)[^<>]*?\{\{.+?\}\}[^<]*?>/gi
+  regex: /<([\w\-_]+?)[^<>]*?\{\{[\s\S]+?\}\}[^<]*?>/g
   replace: (context, match, tagName) ->
     bindings = []
     originalMatch = match
     bindings = []
-    attributeRe = /([a-z\-_]*\s*)=\s*"([^"]*?\{\{.+?\}\}.*?)"/gi
+    attributeRe = /([\w\-_]*\s*)=\s*"([^"]*?\{\{[\s\S]+?\}\}[\s\S]*?)"/g
     replacement = match.replace attributeRe, (match, attrName, attrString) =>
-      attrExpressionString = """ "#{ attrString } " """
+      attrExpressionString = "'#{ attrString }'"
         .replace /(\{\{)|(\}\})/g, (match, isOpen, isClose) =>
-          if isOpen then '" + (' else if isClose then ') + "' else ''
+          if isOpen then "' + (" else if isClose then ") + '" else ''
 
       bindings.push
         type: 'attribute'
@@ -192,7 +212,7 @@ templateReplacers = [
 ,
   # Text tags
   #   e.g. {{ foo }}
-  regex: /\{\{.*?\}\}/g
+  regex: /\{\{[\s\S]*?\}\}/g
   replace: (context, match) ->
     attribute = encodeAttribute [
       type: 'text'
@@ -268,7 +288,7 @@ templateHelpers =
 
     insertItem = (model) =>
       # MAJOR FIXME: this won't accept
-      $item = liveTemplates.init template, model
+      $item = liveTemplates.create template, model
       items.push $item
       $item.insertBefore $placeholder
 
@@ -311,7 +331,7 @@ templateHelpers =
   outlet: (context, binding, $el) ->
 
 _.extend liveTemplates,
-  init: (template, context) ->
+  create: (template, context) ->
     compiled = @compileTemplate template, context
     fragment = @createFragment compiled, context
     bound = @bindFragment fragment, context
@@ -322,6 +342,7 @@ _.extend liveTemplates,
     for replacer, index in templateReplacers
       template = template.replace replacer.regex, (args...) =>
         replacer.replace context, args...
+    console.log 'template', template
     template
 
   createFragment: (template, context) ->

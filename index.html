@@ -4,17 +4,25 @@
   </head>
   </body>
     <div id="main" role="main">
-      {{#each sup }}
+      {{#each yo in sup }}
         <div>{{ yo }}</div>
       {{/each}}
       {{bar}}
-      <div class="{{hi}}">
+      <div class="{{ true ? test : 'goodbye' }} waaa">
         HI! {{ foo( bar ) }}
+
+        {{ true ? 'true' : 'false' }}
 
         {{#if foo("hi")}}
           bar
         {{/if}}
       </div>
+
+
+
+
+
+
     </div>
     <script src="test/vendor/jquery.js"></script>
     <script src="test/vendor/lodash.js"></script>
@@ -25,7 +33,7 @@
     <script src="backbone.extended.live-templates.js"></script>
     <script>
       window.view = new Backbone.View({ el: document.getElementById('main') });
-      view.state = new Backbone.Model;
+      view.state = new Backbone.Model({ test: 'success!' });
       view.get = function () { return this.state.get.apply(this.state, arguments); };
       view.set = function () { this.state.set.apply(this.state, arguments); return this; };
       view.state.on('all', function () { view.trigger.apply(view, arguments); });

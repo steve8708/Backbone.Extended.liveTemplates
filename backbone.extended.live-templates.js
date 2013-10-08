@@ -1,5 +1,6 @@
 (function() {
-  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes,
+  var Backbone, bindExpression, config, decodeAttribute, deserialize, encodeAttribute, escapeForRegex, escapeQuotes, expressionFunctions, getProperty, ifUnlessHelper, isExpression, liveTemplates, parseExpression, replaceTemplateBlocks, reservedWords, stripBoundTag, templateHelpers, templateReplacers, unescapeQuotes,
+    __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; },
     __slice = [].slice;
 
   Backbone = this.Backbone || typeof require === 'function' && require('backbone');
@@ -10,14 +11,18 @@
     logExpressionErrors: true
   };
 
-  window.expressionFunctions = {};
+  expressionFunctions = {};
+
+  reservedWords = 'break case catch continue debugger default delete\
+  do else finally for function if in instanceof new return switch this\
+  throw try typeof var void while with true false null undefined'.split(/\s+/);
 
   escapeQuotes = function(string) {
-    return string.replace(/'/g, "\\'");
+    return string.replace(/'/g, '&#39;');
   };
 
   unescapeQuotes = function(string) {
-    return string.replace(/\\'/g, "'");
+    return string.replace(/\&\#39\;/g, "'");
   };
 
   encodeAttribute = function(object) {
@@ -29,7 +34,7 @@
   };
 
   isExpression = function(string) {
-    return !/^[$a-z_\.]+$/.test(string.trim());
+    return !/^[$\w_\.]+$/.test(string.trim());
   };
 
   escapeForRegex = function(str) {
@@ -51,7 +56,7 @@
     if (string === 'false') {
       return false;
     }
-    if (!isNaN((num = Number(value)))) {
+    if (!isNaN((num = Number(string)))) {
       return num;
     }
     return string;
@@ -70,31 +75,53 @@
     if ((_base = this.liveTemplate.singletons).view == null) {
       _base.view = this;
     }
-    $template = liveTemplates.init(template, this);
+    $template = liveTemplates.create(template, this);
     this.liveTemplate.$template = $template;
     return this.$el.empty().append($template);
   };
 
   parseExpression = function(context, expression) {
-    var dependencies, expressionIsExpression, fn, newExpressionString, regex,
+    var dependencies, expressionIsNotSimpleGetter, fn, index, item, newExpressionArray, newExpressionString, regex, splitReplace, stringSplit, strings, _i, _len, _ref,
       _this = this;
-    regex = /[$a-z\.]+/gi;
+    regex = /([$\w\.])+/gi;
     dependencies = [];
-    newExpressionString = expression.replace(regex, function(keypath) {
-      if (keypath.indexOf('$window.') !== 0 && keypath.indexOf('$view.') !== 0) {
-        dependencies.push(keypath);
-      }
-      return "getProperty( context, '" + keypath + "' )";
+    stringSplit = expression.split(/'[\s\S]*?'/);
+    strings = (expression.match(/'[\s\S]*?'/g)) || [];
+    expression = expression.replace(/'[\S\s]+?'/, function(match) {
+      return match.replace(/(\s)/g, '\\$1');
     });
-    if (isExpression(expression)) {
-      expressionIsExpression = true;
+    splitReplace = stringSplit.map(function(string) {
+      return string.replace(regex, function(keypath) {
+        if (__indexOf.call(reservedWords, keypath) >= 0 || /'|"/.test(keypath)) {
+          return keypath;
+        }
+        if (keypath.indexOf('$window.') !== 0 && keypath.indexOf('$view.') !== 0) {
+          dependencies.push(keypath);
+        }
+        return "getProperty( context, '" + keypath + "' )";
+      });
+    });
+    newExpressionArray = [];
+    _ref = new Array(Math.max(splitReplace.length, strings.length));
+    for (index = _i = 0, _len = _ref.length; _i < _len; index = ++_i) {
+      item = _ref[index];
+      if (splitReplace[index]) {
+        newExpressionArray.push(splitReplace[index]);
+      }
+      if (strings[index]) {
+        newExpressionArray.push(strings[index]);
+      }
     }
-    console.log('expressionIsExpression', expressionIsExpression, expression);
-    if (expressionIsExpression) {
+    newExpressionString = newExpressionArray.join(' ');
+    if (isExpression(expression)) {
+      expressionIsNotSimpleGetter = true;
+    }
+    if (expressionIsNotSimpleGetter) {
       if (expressionFunctions[newExpressionString]) {
         fn = expressionFunctions[newExpressionString];
       } else {
-        fn = new Function('context', 'getProperty', 'expression', 'config', "try {          return " + newExpressionString + "        } catch (error) {          if (config.logExpressionErrors)            console.info('[INFO] Template error caught: \\n' +              '       Expression:' + expression + '\\n' +              '       Message:' + error.message)        }");
+        console.log('newExpressionString', newExpressionString);
+        fn = new Function('context', 'getProperty', 'expression', 'config', "try {          return ( " + newExpressionString + " )        }        catch (error) {          if ( config.logExpressionErrors )            console.info(              '[INFO] Template error caught: '       + '\\n' +              '       Expression: ' + expression     + '\\n' +              '       Message: '    + error.message            );        }");
         expressionFunctions[newExpressionString] = fn;
       }
     }
@@ -102,7 +129,7 @@
       string: expression,
       fn: fn,
       dependencies: dependencies,
-      isExpression: expressionIsExpression
+      isExpression: expressionIsNotSimpleGetter
     };
   };
 
@@ -115,6 +142,9 @@
         res = parsed.fn(context, getProperty, binding.expression, config);
         if (typeof res === 'string') {
           res = deserialize(res);
+        }
+        if (res) {
+          console.log('expressionres', res, parsed.fn);
         }
         if (callback) {
           return callback(res);
@@ -162,7 +192,7 @@
     };
   };
 
-  getProperty = function(context, keypath) {
+  getProperty = function(context, keypath, localOptions) {
     var res, singleton, split, value, _i, _j, _len, _len1, _ref, _ref1;
     if (keypath.indexOf('$window.') === 0) {
       res = window;
@@ -209,21 +239,21 @@
         return '';
       }
     }, {
-      regex: /<([a-z\-_]+?)[^<>]*?\{\{.+?\}\}[^<]*?>/gi,
+      regex: /<([\w\-_]+?)[^<>]*?\{\{[\s\S]+?\}\}[^<]*?>/g,
       replace: function(context, match, tagName) {
         var attributeRe, bindings, originalMatch, replacement,
           _this = this;
         bindings = [];
         originalMatch = match;
         bindings = [];
-        attributeRe = /([a-z\-_]*\s*)=\s*"([^"]*?\{\{.+?\}\}.*?)"/gi;
+        attributeRe = /([\w\-_]*\s*)=\s*"([^"]*?\{\{[\s\S]+?\}\}[\s\S]*?)"/g;
         replacement = match.replace(attributeRe, function(match, attrName, attrString) {
           var attrExpressionString;
-          attrExpressionString = (" \"" + attrString + " \" ").replace(/(\{\{)|(\}\})/g, function(match, isOpen, isClose) {
+          attrExpressionString = ("'" + attrString + "'").replace(/(\{\{)|(\}\})/g, function(match, isOpen, isClose) {
             if (isOpen) {
-              return '" + (';
+              return "' + (";
             } else if (isClose) {
-              return ') + "';
+              return ") + '";
             } else {
               return '';
             }
@@ -239,7 +269,7 @@
         return replacement;
       }
     }, {
-      regex: /\{\{.*?\}\}/g,
+      regex: /\{\{[\s\S]*?\}\}/g,
       replace: function(context, match) {
         var attribute;
         attribute = encodeAttribute([
@@ -324,7 +354,7 @@
       window.items = items;
       insertItem = function(model) {
         var $item;
-        $item = liveTemplates.init(template, model);
+        $item = liveTemplates.create(template, model);
         items.push($item);
         return $item.insertBefore($placeholder);
       };
@@ -381,7 +411,7 @@
   };
 
   _.extend(liveTemplates, {
-    init: function(template, context) {
+    create: function(template, context) {
       var bound, compiled, fragment;
       compiled = this.compileTemplate(template, context);
       fragment = this.createFragment(compiled, context);
@@ -403,6 +433,7 @@
           return replacer.replace.apply(replacer, [context].concat(__slice.call(args)));
         });
       }
+      console.log('template', template);
       return template;
     },
     createFragment: function(template, context) {
