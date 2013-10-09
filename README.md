@@ -2,7 +2,7 @@
 
 Ultra lightweight and high performance self updating templates for Backbone! Hot dayamn
 
-Inspired by [handlebars](http://handlebarsjs.com/), [angularjs](http://angularjs.org/), and
+Inspired by [angular](http://angularjs.org/), [handlebars](http://handlebarsjs.com/), and
 [ractive](http://ractivejs.org/).
 
 ```html
